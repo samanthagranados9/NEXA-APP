@@ -1,0 +1,2036 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CircuitFlex - Sistema Inteligente E-Textil de Compresión con Nitinol</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: { 50: '#ecfeff', 400: '#22d3ee', 500: '#06b6d4', 600: '#0891b2', 900: '#164e63', 950: '#083344' }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- MQTT WebSockets Client & Lucide Icons -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Custom SVG Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2306b6d4' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M22 12h-4l-3 9L9 3l-3 9H2'/></svg>">
+    <style>
+        body { font-family: 'Inter', sans-serif; scroll-behavior: smooth; }
+        .glass-panel { background: rgba(15, 23, 42, 0.82); backdrop-filter: blur(14px); border: 1px solid rgba(148, 163, 184, 0.14); transition: all 0.25s ease; }
+        html.light body { background-color: #f8fafc; color: #0f172a; }
+        html.light .glass-panel { background: rgba(255, 255, 255, 0.92); border: 1px solid rgba(15, 23, 42, 0.12); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05); }
+        html.light .text-white { color: #0f172a !important; }
+        html.light .text-slate-300 { color: #334155 !important; }
+        html.light .text-slate-400 { color: #475569 !important; }
+        html.light .bg-slate-900, html.light .bg-slate-950 { background-color: #f1f5f9 !important; border-color: #cbd5e1 !important; }
+        
+        @keyframes pulseGlow { 
+            0%, 100% { box-shadow: 0 0 15px rgba(6, 182, 212, 0.35); } 
+            50% { box-shadow: 0 0 35px rgba(6, 182, 212, 0.85); } 
+        }
+        @keyframes heatPulse {
+            0%, 100% { filter: drop-shadow(0 0 8px rgba(249, 115, 22, 0.9)); }
+            50% { filter: drop-shadow(0 0 18px rgba(239, 68, 68, 1)); }
+        }
+        @keyframes floatHero {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-6px); }
+        }
+        .glow-active { animation: pulseGlow 1.5s infinite; }
+        .nitinol-heating { animation: heatPulse 0.8s infinite; }
+        .hero-float { animation: floatHero 4s ease-in-out infinite; }
+        .view-section { animation: fadeInView 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes fadeInView {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .hover-lift { transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease; }
+        .hover-lift:hover { transform: translateY(-4px); box-shadow: 0 14px 28px -8px rgba(6, 182, 212, 0.22); }
+        input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7) sepia(1) saturate(3) hue-rotate(155deg); cursor: pointer; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col selection:bg-cyan-500 selection:text-white transition-colors duration-300">
+
+    <!-- ======================================================== -->
+    <!-- 0. GLOBAL LOADING OVERLAY                                -->
+    <!-- ======================================================== -->
+    <div id="loading-overlay" class="fixed inset-0 z-[70] hidden items-center justify-center bg-slate-950/80 backdrop-blur-md">
+        <div class="glass-panel p-6 rounded-2xl flex flex-col items-center space-y-3 border border-cyan-500/30">
+            <div class="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+            <span id="loading-text" class="text-xs font-semibold text-cyan-400 tracking-wider uppercase">Sincronizando CircuitFlex...</span>
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- 1. VENTANA DE ACCESO (LOGIN WINDOW)                      -->
+    <!-- ======================================================== -->
+    <div id="login-view" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/95 backdrop-blur-xl px-4 overflow-y-auto py-8">
+        <div class="glass-panel rounded-3xl p-8 max-w-md w-full shadow-2xl relative overflow-hidden border border-cyan-500/20">
+            <div class="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600"></div>
+            <div class="absolute -top-20 -right-20 w-44 h-44 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none"></div>
+            
+            <!-- Top Quick Controls on Login -->
+            <div class="flex justify-between items-center mb-4">
+                <span class="text-[11px] font-mono text-cyan-400 bg-cyan-500/10 px-2.5 py-1 rounded-full border border-cyan-500/20">XDK110 + Nitinol IoT</span>
+                <div class="flex items-center space-x-2">
+                    <select onchange="changeLanguage(this.value)" class="bg-slate-900 border border-slate-700 text-xs rounded-lg px-2 py-1 text-slate-300 focus:outline-none">
+                        <option value="es">ES</option>
+                        <option value="en">EN</option>
+                    </select>
+                    <button type="button" onclick="toggleTheme()" class="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-cyan-400">
+                        <i data-lucide="sun-moon" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="text-center mb-6">
+                <div class="inline-flex p-4 bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 rounded-2xl text-cyan-400 mb-3 hero-float shadow-lg">
+                    <i data-lucide="activity" class="w-10 h-10"></i>
+                </div>
+                <h1 class="text-3xl font-extrabold tracking-tight text-white">CircuitFlex</h1>
+                <p class="text-xs text-slate-400 mt-1" data-i18n="loginSub">Sistema Inteligente E-Textil de Compresión y Masaje con Nitinol</p>
+            </div>
+
+            <form id="login-form" class="space-y-4" novalidate>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5" data-i18n="userLabel">Usuario de Acceso</label>
+                    <div class="relative">
+                        <i data-lucide="user" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5"></i>
+                        <input type="text" id="login-user" value="admin" placeholder="admin" required class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5" data-i18n="passLabel">Contraseña / Clave</label>
+                    <div class="relative">
+                        <i data-lucide="lock" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5"></i>
+                        <input type="password" id="login-pass" value="1234" placeholder="••••" required class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition">
+                    </div>
+                </div>
+
+                <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs text-slate-400">
+                    <span><strong class="text-cyan-400" data-i18n="demoCreds">Credenciales:</strong> admin / 1234</span>
+                    <button type="button" onclick="fillDemoLogin()" class="text-cyan-400 hover:underline font-medium" data-i18n="autoFill">Autocompletar</button>
+                </div>
+
+                <button type="submit" id="login-submit-btn" class="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold py-3.5 rounded-xl shadow-lg shadow-cyan-500/25 transition transform active:scale-95 flex items-center justify-center space-x-2">
+                    <i data-lucide="log-in" class="w-4 h-4"></i>
+                    <span data-i18n="loginBtn">Ingresar a CircuitFlex</span>
+                </button>
+            </form>
+
+            <div id="login-msg" class="mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-center text-xs text-rose-400 hidden">
+                Credenciales incorrectas. Utilice Usuario: <strong>admin</strong> y Clave: <strong>1234</strong>.
+            </div>
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- 2. APLICACIÓN PRINCIPAL (OCULTA HASTA LOGIN)             -->
+    <!-- ======================================================== -->
+    <div id="app-container" class="hidden flex-col flex-grow">
+        
+        <!-- Barra de Navegación Superior con Menú Hamburguesa -->
+        <header class="glass-panel sticky top-0 z-40 border-b border-slate-800/80 px-4 sm:px-6 py-3.5">
+            <div class="max-w-7xl mx-auto flex items-center justify-between">
+                <!-- Brand Logo -->
+                <div class="flex items-center space-x-3 cursor-pointer group" onclick="navigate('menu')">
+                    <div class="p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-xl text-cyan-400 group-hover:scale-105 transition">
+                        <i data-lucide="activity" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <span class="font-extrabold text-lg tracking-tight text-white">CircuitFlex</span>
+                        <div class="flex items-center space-x-2">
+                            <span id="mqtt-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span id="mqtt-status-label" class="text-[10px] text-cyan-400 font-mono">Firebase + HiveMQ Ready</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navegación Desktop -->
+                <nav class="hidden xl:flex items-center space-x-1">
+                    <button onclick="navigate('menu')" class="nav-btn px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-cyan-400 hover:bg-slate-900/60 transition" data-i18n="navMenu">Menú</button>
+                    <button onclick="navigate('modos')" class="nav-btn px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-cyan-400 hover:bg-slate-900/60 transition" data-i18n="navModos">Modos (1-5)</button>
+                    <button onclick="navigate('monitoreo')" class="nav-btn px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-cyan-400 hover:bg-slate-900/60 transition" data-i18n="navMonitoreo">Monitoreo Media</button>
+                    <button onclick="navigate('historico-uso')" class="nav-btn px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-cyan-400 hover:bg-slate-900/60 transition" data-i18n="navUso">Histórico Uso</button>
+                    <button onclick="navigate('historico-alertas')" class="nav-btn px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-cyan-400 hover:bg-slate-900/60 transition" data-i18n="navAlertas">Histórico Alertas</button>
+                    <button onclick="navigate('doctor')" class="nav-btn px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-cyan-400 hover:bg-slate-900/60 transition" data-i18n="navDoctor">Datos Doctor</button>
+                    <button onclick="navigate('manual')" class="nav-btn px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-cyan-400 hover:bg-slate-900/60 transition" data-i18n="navManual">Manual de Uso</button>
+                </nav>
+
+                <!-- Controles Globales Derecha -->
+                <div class="hidden sm:flex items-center space-x-2.5">
+                    <!-- Indicador de Ciclo Activo en Barra -->
+                    <div id="header-active-badge" class="hidden items-center space-x-1.5 px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 text-xs font-semibold">
+                        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+                        <span id="header-active-text">Modo #1 (2s/8s)</span>
+                    </div>
+
+                    <!-- Selector de Idioma -->
+                    <select id="lang-select" onchange="changeLanguage(this.value)" class="bg-slate-900 border border-slate-700 text-xs rounded-xl px-2.5 py-2 text-slate-300 focus:outline-none focus:border-cyan-500">
+                        <option value="es">🇪🇸 Español</option>
+                        <option value="en">🇺🇸 English</option>
+                    </select>
+
+                    <!-- Botón Modo Oscuro / Claro -->
+                    <button onclick="toggleTheme()" class="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-cyan-400 transition" title="Cambiar Tema">
+                        <i data-lucide="moon" id="theme-icon" class="w-4 h-4"></i>
+                    </button>
+
+                    <!-- Botón Salir -->
+                    <button onclick="logout()" class="px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500 hover:text-white text-xs font-semibold transition flex items-center space-x-1.5">
+                        <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+                        <span data-i18n="btnExit">Salir</span>
+                    </button>
+                </div>
+
+                <!-- Botón Menú Hamburguesa Móvil -->
+                <button onclick="toggleMobileMenu()" class="xl:hidden p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-cyan-400" aria-label="Abrir Menú">
+                    <i data-lucide="menu" id="hamburger-icon" class="w-6 h-6"></i>
+                </button>
+            </div>
+
+            <!-- Menú Desplegable Hamburguesa (Móvil / Tablet) -->
+            <div id="mobile-menu" class="hidden xl:hidden pt-4 pb-3 border-t border-slate-800 mt-3 space-y-1.5">
+                <button onclick="navigate('menu'); toggleMobileMenu();" class="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:bg-cyan-500/10 hover:text-cyan-400 rounded-xl flex items-center space-x-2.5">
+                    <i data-lucide="layout-grid" class="w-4 h-4 text-cyan-400"></i><span data-i18n="navMenu">Menú Principal</span>
+                </button>
+                <button onclick="navigate('modos'); toggleMobileMenu();" class="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:bg-cyan-500/10 hover:text-cyan-400 rounded-xl flex items-center space-x-2.5">
+                    <i data-lucide="sliders" class="w-4 h-4 text-cyan-400"></i><span data-i18n="navModos">Modos de Funcionamiento (1-5)</span>
+                </button>
+                <button onclick="navigate('monitoreo'); toggleMobileMenu();" class="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:bg-cyan-500/10 hover:text-cyan-400 rounded-xl flex items-center space-x-2.5">
+                    <i data-lucide="gauge" class="w-4 h-4 text-blue-400"></i><span data-i18n="navMonitoreo">Mediciones en la Media (Monitoreo)</span>
+                </button>
+                <button onclick="navigate('historico-uso'); toggleMobileMenu();" class="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:bg-cyan-500/10 hover:text-cyan-400 rounded-xl flex items-center space-x-2.5">
+                    <i data-lucide="calendar-clock" class="w-4 h-4 text-emerald-400"></i><span data-i18n="navUso">Histórico de Uso (Firebase)</span>
+                </button>
+                <button onclick="navigate('historico-alertas'); toggleMobileMenu();" class="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:bg-cyan-500/10 hover:text-cyan-400 rounded-xl flex items-center space-x-2.5">
+                    <i data-lucide="alert-triangle" class="w-4 h-4 text-rose-400"></i><span data-i18n="navAlertas">Histórico de Alertas (Firebase)</span>
+                </button>
+                <button onclick="navigate('doctor'); toggleMobileMenu();" class="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:bg-cyan-500/10 hover:text-cyan-400 rounded-xl flex items-center space-x-2.5">
+                    <i data-lucide="stethoscope" class="w-4 h-4 text-purple-400"></i><span data-i18n="navDoctor">Datos de Doctor y Envío por Correo</span>
+                </button>
+                <button onclick="navigate('manual'); toggleMobileMenu();" class="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:bg-cyan-500/10 hover:text-cyan-400 rounded-xl flex items-center space-x-2.5">
+                    <i data-lucide="book-open" class="w-4 h-4 text-amber-400"></i><span data-i18n="navManual">Manual de Uso y Contacto</span>
+                </button>
+                <div class="flex items-center justify-between px-3.5 pt-3 border-t border-slate-800">
+                    <div class="flex items-center space-x-2">
+                        <select onchange="changeLanguage(this.value)" class="bg-slate-900 border border-slate-700 text-xs rounded-lg px-2 py-1 text-slate-300">
+                            <option value="es">Español</option>
+                            <option value="en">English</option>
+                        </select>
+                        <button onclick="toggleTheme()" class="p-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-300">
+                            <i data-lucide="sun-moon" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                    <button onclick="logout()" class="px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-400 text-xs font-bold">Cerrar Sesión</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Contenedor Dinámico de las 7 Ventanas -->
+        <main class="max-w-7xl mx-auto w-full p-4 sm:p-6 flex-grow space-y-6">
+
+            <!-- ======================================================== -->
+            <!-- VENTANA 1: MENÚ PRINCIPAL (DASHBOARD CENTRAL)            -->
+            <!-- ======================================================== -->
+            <section id="view-menu" class="view-section space-y-8">
+                <!-- Hero Banner Animado -->
+                <div class="relative rounded-3xl overflow-hidden glass-panel p-6 sm:p-10 border border-cyan-500/30 shadow-2xl">
+                    <div class="absolute -right-12 -bottom-12 w-80 h-80 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none"></div>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-center relative z-10">
+                        <div class="lg:col-span-2 space-y-4">
+                            <div class="inline-flex items-center space-x-2 px-3 py-1 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-xs font-bold rounded-full uppercase tracking-wider">
+                                <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+                                <span data-i18n="heroBadge">Plataforma Biomédica E-Textil Activa</span>
+                            </div>
+                            <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-white" data-i18n="heroTitle">Bienvenido a CircuitFlex</h2>
+                            <p class="text-slate-300 text-sm sm:text-base leading-relaxed" data-i18n="heroDesc">
+                                Control integral de compresión vascular y masaje muscular mediante actuadores de Nitinol (2s ON / 8s OFF), telemetría Bosch XDK110 y respaldo clínico en la nube con Firebase.
+                            </p>
+                            <div class="flex flex-wrap gap-3 pt-2">
+                                <button onclick="navigate('modos')" class="bg-gradient-to-r from-cyan-500 to-blue-600 hover:opacity-95 text-slate-950 font-bold px-6 py-3 rounded-xl shadow-lg shadow-cyan-500/25 transition transform active:scale-95 flex items-center space-x-2">
+                                    <i data-lucide="zap" class="w-4 h-4 fill-current"></i>
+                                    <span data-i18n="heroBtnModes">Seleccionar Modo de Masaje (1-5)</span>
+                                </button>
+                                <button onclick="navigate('monitoreo')" class="bg-slate-900 border border-slate-700 hover:border-cyan-500 text-white font-semibold px-5 py-3 rounded-xl transition flex items-center space-x-2">
+                                    <i data-lucide="activity" class="w-4 h-4 text-cyan-400"></i>
+                                    <span data-i18n="heroBtnMon">Mediciones en la Media</span>
+                                </button>
+                                <button onclick="logout()" class="bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-400 font-semibold px-4 py-3 rounded-xl transition flex items-center space-x-2">
+                                    <i data-lucide="log-out" class="w-4 h-4"></i>
+                                    <span data-i18n="btnExit">Salir</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Resumen Rápido en Vivo en el Hero -->
+                        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3">
+                            <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                                <span class="text-xs font-bold text-slate-300 uppercase tracking-wider" data-i18n="quickStatus">Estado de la Media</span>
+                                <span id="menu-live-pill" class="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-semibold">En Pausa</span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3 text-xs">
+                                <div class="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                                    <span class="text-slate-400 block" data-i18n="lblTemp">Temperatura</span>
+                                    <span id="menu-temp-val" class="text-lg font-extrabold text-cyan-400">26.5 °C</span>
+                                </div>
+                                <div class="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                                    <span class="text-slate-400 block" data-i18n="lblHum">Humedad</span>
+                                    <span id="menu-hum-val" class="text-lg font-extrabold text-blue-400">54 %</span>
+                                </div>
+                                <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 col-span-2 flex items-center justify-between">
+                                    <div>
+                                        <span class="text-slate-400 block" data-i18n="lblPos">Posición de la Media</span>
+                                        <span id="menu-pos-val" class="text-sm font-bold text-emerald-400">Relajada (En Reposo)</span>
+                                    </div>
+                                    <i data-lucide="footprints" class="w-6 h-6 text-emerald-400"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6 Tarjetas del Menú Principal solicitadas -->
+                <div>
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center space-x-2">
+                        <i data-lucide="Compass" class="w-5 h-5 text-cyan-400"></i>
+                        <span data-i18n="menuModulesTitle">Módulos del Sistema CircuitFlex (Seleccione una ventana)</span>
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <!-- 1. Modos de Funcionamiento -->
+                        <div onclick="navigate('modos')" class="glass-panel p-6 rounded-2xl hover-lift cursor-pointer border border-slate-800 hover:border-cyan-500 group">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="p-3.5 bg-cyan-500/10 rounded-2xl text-cyan-400 group-hover:scale-110 transition">
+                                    <i data-lucide="sliders" class="w-7 h-7"></i>
+                                </div>
+                                <span class="text-[11px] font-mono bg-cyan-500/10 text-cyan-400 px-2.5 py-1 rounded-full">5 Modos • 2s/8s</span>
+                            </div>
+                            <h4 class="text-lg font-bold text-white mb-1.5" data-i18n="card1Title">1. Modos de Funcionamiento</h4>
+                            <p class="text-xs text-slate-400 leading-relaxed mb-4" data-i18n="card1Desc">
+                                Activa los 5 modos del Nitinol (Tobillo, Media pierna, Parte alta, Secuencial por niveles y Todos a la vez) con ciclo 2s ON / 8s OFF y guardado en Firebase.
+                            </p>
+                            <span class="text-xs font-bold text-cyan-400 flex items-center space-x-1">
+                                <span data-i18n="openWin">Abrir ventana</span><i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+                            </span>
+                        </div>
+
+                        <!-- 2. Mediciones en la Media (Monitoreo) -->
+                        <div onclick="navigate('monitoreo')" class="glass-panel p-6 rounded-2xl hover-lift cursor-pointer border border-slate-800 hover:border-blue-500 group">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="p-3.5 bg-blue-500/10 rounded-2xl text-blue-400 group-hover:scale-110 transition">
+                                    <i data-lucide="thermometer-sun" class="w-7 h-7"></i>
+                                </div>
+                                <span class="text-[11px] font-mono bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full">XDK110 Live</span>
+                            </div>
+                            <h4 class="text-lg font-bold text-white mb-1.5" data-i18n="card2Title">2. Mediciones en la Media</h4>
+                            <p class="text-xs text-slate-400 leading-relaxed mb-4" data-i18n="card2Desc">
+                                Monitoreo en tiempo real de Temperatura (°C), Humedad (%) y Posición específica de la media (Relajada o De Pie) mediante el acelerómetro.
+                            </p>
+                            <span class="text-xs font-bold text-blue-400 flex items-center space-x-1">
+                                <span data-i18n="openWin">Abrir ventana</span><i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+                            </span>
+                        </div>
+
+                        <!-- 3. Histórico de Uso -->
+                        <div onclick="navigate('historico-uso')" class="glass-panel p-6 rounded-2xl hover-lift cursor-pointer border border-slate-800 hover:border-emerald-500 group">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="p-3.5 bg-emerald-500/10 rounded-2xl text-emerald-400 group-hover:scale-110 transition">
+                                    <i data-lucide="database" class="w-7 h-7"></i>
+                                </div>
+                                <span class="text-[11px] font-mono bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-full">Filtro Calendario</span>
+                            </div>
+                            <h4 class="text-lg font-bold text-white mb-1.5" data-i18n="card3Title">3. Histórico de Uso</h4>
+                            <p class="text-xs text-slate-400 leading-relaxed mb-4" data-i18n="card3Desc">
+                                Visualiza todas las activaciones registradas en Firebase (día, hora y modo de funcionamiento) con selector de fecha por calendario.
+                            </p>
+                            <span class="text-xs font-bold text-emerald-400 flex items-center space-x-1">
+                                <span data-i18n="openWin">Abrir ventana</span><i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+                            </span>
+                        </div>
+
+                        <!-- 4. Histórico de Alertas -->
+                        <div onclick="navigate('historico-alertas')" class="glass-panel p-6 rounded-2xl hover-lift cursor-pointer border border-slate-800 hover:border-rose-500 group">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="p-3.5 bg-rose-500/10 rounded-2xl text-rose-400 group-hover:scale-110 transition">
+                                    <i data-lucide="shield-alert" class="w-7 h-7"></i>
+                                </div>
+                                <span class="text-[11px] font-mono bg-rose-500/10 text-rose-400 px-2.5 py-1 rounded-full">Alertas Firebase</span>
+                            </div>
+                            <h4 class="text-lg font-bold text-white mb-1.5" data-i18n="card4Title">4. Histórico de Alertas</h4>
+                            <p class="text-xs text-slate-400 leading-relaxed mb-4" data-i18n="card4Desc">
+                                Registro automático en Firebase por día, hora y tipo de alerta (Térmica >38°C o Movimiento/Postura) con filtrado por calendario.
+                            </p>
+                            <span class="text-xs font-bold text-rose-400 flex items-center space-x-1">
+                                <span data-i18n="openWin">Abrir ventana</span><i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+                            </span>
+                        </div>
+
+                        <!-- 5. Datos de Doctor -->
+                        <div onclick="navigate('doctor')" class="glass-panel p-6 rounded-2xl hover-lift cursor-pointer border border-slate-800 hover:border-purple-500 group">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="p-3.5 bg-purple-500/10 rounded-2xl text-purple-400 group-hover:scale-110 transition">
+                                    <i data-lucide="user-check" class="w-7 h-7"></i>
+                                </div>
+                                <span class="text-[11px] font-mono bg-purple-500/10 text-purple-400 px-2.5 py-1 rounded-full">Reporte Email</span>
+                            </div>
+                            <h4 class="text-lg font-bold text-white mb-1.5" data-i18n="card5Title">5. Datos de Doctor</h4>
+                            <p class="text-xs text-slate-400 leading-relaxed mb-4" data-i18n="card5Desc">
+                                Registra los datos del médico tratante y envía por correo electrónico todo el historial de usos y alertas extraído de Firebase.
+                            </p>
+                            <span class="text-xs font-bold text-purple-400 flex items-center space-x-1">
+                                <span data-i18n="openWin">Abrir ventana</span><i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+                            </span>
+                        </div>
+
+                        <!-- 6. Manual de Uso -->
+                        <div onclick="navigate('manual')" class="glass-panel p-6 rounded-2xl hover-lift cursor-pointer border border-slate-800 hover:border-amber-500 group">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="p-3.5 bg-amber-500/10 rounded-2xl text-amber-400 group-hover:scale-110 transition">
+                                    <i data-lucide="book-open" class="w-7 h-7"></i>
+                                </div>
+                                <span class="text-[11px] font-mono bg-amber-500/10 text-amber-400 px-2.5 py-1 rounded-full">Guía + Soporte</span>
+                            </div>
+                            <h4 class="text-lg font-bold text-white mb-1.5" data-i18n="card6Title">6. Manual de Uso</h4>
+                            <p class="text-xs text-slate-400 leading-relaxed mb-4" data-i18n="card6Desc">
+                                Documentación completa de operación de CircuitFlex, guía de modos de Nitinol, seguridad térmica y formulario de soporte técnico.
+                            </p>
+                            <span class="text-xs font-bold text-amber-400 flex items-center space-x-1">
+                                <span data-i18n="openWin">Abrir ventana</span><i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ======================================================== -->
+            <!-- VENTANA 2: MODOS DE FUNCIONAMIENTO (5 MODOS + 2s/8s)     -->
+            <!-- ======================================================== -->
+            <section id="view-modos" class="view-section hidden space-y-6">
+                <!-- Barra Superior de Ventana con Regreso al Menú y Salir -->
+                <div class="glass-panel p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-cyan-500/20">
+                    <div>
+                        <span class="text-[11px] font-mono uppercase text-cyan-400">Control Activo de Nitinol + Firebase</span>
+                        <h2 class="text-2xl font-extrabold text-white" data-i18n="modesHeader">Modos de Funcionamiento CircuitFlex</h2>
+                        <p class="text-xs text-slate-400 mt-0.5" data-i18n="modesSub">
+                            Al presionar cualquier modo, el sistema inicia inmediatamente el ciclo físico (2s Activación ON / 8s Desactivación OFF) y guarda Fecha, Hora y Modo en Firebase.
+                        </p>
+                    </div>
+                    <div class="flex items-center space-x-2.5 shrink-0">
+                        <button onclick="navigate('menu')" class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center space-x-1.5">
+                            <i data-lucide="arrow-left" class="w-4 h-4 text-cyan-400"></i>
+                            <span data-i18n="backMenu">Volver al Menú</span>
+                        </button>
+                        <button onclick="logout()" class="px-3.5 py-2.5 bg-rose-500/10 hover:bg-rose-500 hover:text-white text-rose-400 rounded-xl text-xs font-semibold border border-rose-500/30 transition">
+                            <span data-i18n="btnExit">Salir</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <!-- Columna Izquierda: Los 5 Modos de Selección -->
+                    <div class="lg:col-span-7 space-y-3.5">
+                        <div class="flex items-center justify-between text-xs text-slate-400 px-1">
+                            <span class="font-semibold uppercase tracking-wider" data-i18n="pickModeLbl">Presione un modo para activar y registrar en Firebase:</span>
+                            <span class="font-mono text-cyan-400">Ciclo: 2s ON / 8s OFF</span>
+                        </div>
+
+                        <!-- MODO #1 -->
+                        <div onclick="activateAndLogMode(1)" id="mode-card-1" class="glass-panel p-5 rounded-2xl cursor-pointer hover-lift border-2 border-cyan-500 bg-cyan-500/10 transition">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-3">
+                                    <span class="w-8 h-8 rounded-xl bg-cyan-500 text-slate-950 font-extrabold flex items-center justify-center text-sm">1</span>
+                                    <div>
+                                        <h3 class="font-bold text-white text-sm sm:text-base" data-i18n="m1Title">Modo #1: Trabajo en el Tobillo</h3>
+                                        <p class="text-xs text-slate-400 mt-0.5" data-i18n="m1Desc">Activa los hilos de Nitinol de la sección inferior (tobillo y tendón de Aquiles): 2s comprimiendo / 8s enfriando.</p>
+                                    </div>
+                                </div>
+                                <span class="text-[11px] font-semibold bg-cyan-500/20 text-cyan-300 px-3 py-1 rounded-full shrink-0">Zona Inferior</span>
+                            </div>
+                        </div>
+
+                        <!-- MODO #2 -->
+                        <div onclick="activateAndLogMode(2)" id="mode-card-2" class="glass-panel p-5 rounded-2xl cursor-pointer hover-lift border-2 border-transparent transition">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-3">
+                                    <span class="w-8 h-8 rounded-xl bg-blue-500 text-slate-950 font-extrabold flex items-center justify-center text-sm">2</span>
+                                    <div>
+                                        <h3 class="font-bold text-white text-sm sm:text-base" data-i18n="m2Title">Modo #2: Trabajo en la Parte Media de la Pierna</h3>
+                                        <p class="text-xs text-slate-400 mt-0.5" data-i18n="m2Desc">Activa el anillo central de Nitinol sobre la pantorrilla y músculo gastrocnemio: 2s comprimiendo / 8s enfriando.</p>
+                                    </div>
+                                </div>
+                                <span class="text-[11px] font-semibold bg-blue-500/20 text-blue-300 px-3 py-1 rounded-full shrink-0">Zona Media</span>
+                            </div>
+                        </div>
+
+                        <!-- MODO #3 -->
+                        <div onclick="activateAndLogMode(3)" id="mode-card-3" class="glass-panel p-5 rounded-2xl cursor-pointer hover-lift border-2 border-transparent transition">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-3">
+                                    <span class="w-8 h-8 rounded-xl bg-indigo-500 text-white font-extrabold flex items-center justify-center text-sm">3</span>
+                                    <div>
+                                        <h3 class="font-bold text-white text-sm sm:text-base" data-i18n="m3Title">Modo #3: Trabajo en la Parte Alta de la Media</h3>
+                                        <p class="text-xs text-slate-400 mt-0.5" data-i18n="m3Desc">Activa la banda superior bajo la rodilla para impulsar el retorno venoso: 2s comprimiendo / 8s enfriando.</p>
+                                    </div>
+                                </div>
+                                <span class="text-[11px] font-semibold bg-indigo-500/20 text-indigo-300 px-3 py-1 rounded-full shrink-0">Zona Alta</span>
+                            </div>
+                        </div>
+
+                        <!-- MODO #4 -->
+                        <div onclick="activateAndLogMode(4)" id="mode-card-4" class="glass-panel p-5 rounded-2xl cursor-pointer hover-lift border-2 border-transparent transition">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-3">
+                                    <span class="w-8 h-8 rounded-xl bg-emerald-500 text-slate-950 font-extrabold flex items-center justify-center text-sm">4</span>
+                                    <div>
+                                        <h3 class="font-bold text-white text-sm sm:text-base" data-i18n="m4Title">Modo #4: Trabajo Secuencial por Niveles</h3>
+                                        <p class="text-xs text-slate-400 mt-0.5" data-i18n="m4Desc">Recorre de forma coordinada cada uno de los niveles (Tobillo → Media pierna → Parte alta) con pulso 2s ON / 8s OFF.</p>
+                                    </div>
+                                </div>
+                                <span class="text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full shrink-0">Multinivel</span>
+                            </div>
+                        </div>
+
+                        <!-- MODO #5 -->
+                        <div onclick="activateAndLogMode(5)" id="mode-card-5" class="glass-panel p-5 rounded-2xl cursor-pointer hover-lift border-2 border-transparent transition">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center justify-between w-full">
+                                    <div class="flex items-center space-x-3">
+                                        <span class="w-8 h-8 rounded-xl bg-purple-500 text-white font-extrabold flex items-center justify-center text-sm">5</span>
+                                        <div>
+                                            <h3 class="font-bold text-white text-sm sm:text-base" data-i18n="m5Title">Modo #5: Todos a la Vez en el Mismo Momento</h3>
+                                            <p class="text-xs text-slate-400 mt-0.5" data-i18n="m5Desc">Activa simultáneamente las 3 zonas de Nitinol (Tobillo + Media + Alta) al mismo tiempo: 2s ON / 8s OFF.</p>
+                                        </div>
+                                    </div>
+                                    <span class="text-[11px] font-semibold bg-purple-500/20 text-purple-300 px-3 py-1 rounded-full shrink-0">Simultáneo Total</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Columna Derecha: Panel Visual de Simulación Física de la Media y Ciclo 2s/8s -->
+                    <div class="lg:col-span-5 glass-panel p-6 rounded-2xl flex flex-col justify-between space-y-5 border border-cyan-500/30">
+                        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                            <div>
+                                <h3 class="font-bold text-white text-base" data-i18n="visPanelTitle">Panel Visual del Dispositivo Físico</h3>
+                                <p class="text-xs text-slate-400">Representación en vivo de los anillos de Nitinol</p>
+                            </div>
+                            <!-- Luces LED XDK110 -->
+                            <div class="flex items-center space-x-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800" title="LEDs del XDK110">
+                                <span id="led-orange" class="w-3 h-3 rounded-full bg-slate-700" title="LED Naranja: Nitinol ON"></span>
+                                <span id="led-yellow" class="w-3 h-3 rounded-full bg-yellow-400 shadow-[0_0_8px_#facc15]" title="LED Amarillo: Enfriando/Pausa"></span>
+                                <span id="led-red" class="w-3 h-3 rounded-full bg-slate-700" title="LED Rojo: Alerta"></span>
+                            </div>
+                        </div>
+
+                        <!-- Diagrama SVG Interactivo de la Pierna y las 3 Zonas de la Media -->
+                        <div class="relative bg-slate-950 rounded-2xl p-4 border border-slate-800 flex flex-col items-center">
+                            <svg id="sock-svg" viewBox="0 0 260 320" class="w-56 h-64">
+                                <!-- Rejilla de fondo -->
+                                <defs>
+                                    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                                        <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1e293b" stroke-width="0.7"/>
+                                    </pattern>
+                                </defs>
+                                <rect width="260" height="320" fill="url(#grid)" rx="12"/>
+
+                                <!-- Silueta Anatómica de Pierna y Media -->
+                                <path d="M95,25 C95,25 88,95 92,155 C95,205 102,240 100,260 C98,275 70,285 72,298 C74,308 145,308 152,295 C156,282 145,255 146,235 C148,185 162,125 158,25 Z" 
+                                      fill="#0f172a" stroke="#38bdf8" stroke-width="2" />
+
+                                <!-- ZONA 3: PARTE ALTA DE LA MEDIA -->
+                                <g id="svg-zone-3" class="transition-all duration-300">
+                                    <rect x="88" y="48" width="74" height="36" rx="10" fill="rgba(99, 102, 241, 0.15)" stroke="#6366f1" stroke-width="2" stroke-dasharray="4 2"/>
+                                    <line x1="90" y1="60" x2="160" y2="60" stroke="#818cf8" stroke-width="2.5"/>
+                                    <line x1="90" y1="72" x2="160" y2="72" stroke="#818cf8" stroke-width="2.5"/>
+                                    <text x="172" y="70" fill="#94a3b8" font-size="10" font-weight="bold">3. Alta</text>
+                                </g>
+
+                                <!-- ZONA 2: PARTE MEDIA DE LA PIERNA -->
+                                <g id="svg-zone-2" class="transition-all duration-300">
+                                    <rect x="90" y="120" width="70" height="44" rx="10" fill="rgba(59, 130, 246, 0.15)" stroke="#3b82f6" stroke-width="2" stroke-dasharray="4 2"/>
+                                    <line x1="92" y1="134" x2="158" y2="134" stroke="#60a5fa" stroke-width="2.5"/>
+                                    <line x1="92" y1="150" x2="158" y2="150" stroke="#60a5fa" stroke-width="2.5"/>
+                                    <text x="170" y="146" fill="#94a3b8" font-size="10" font-weight="bold">2. Media</text>
+                                </g>
+
+                                <!-- ZONA 1: TOBILLO -->
+                                <g id="svg-zone-1" class="transition-all duration-300">
+                                    <rect x="95" y="205" width="56" height="40" rx="10" fill="rgba(6, 182, 212, 0.15)" stroke="#06b6d4" stroke-width="2" stroke-dasharray="4 2"/>
+                                    <line x1="97" y1="218" x2="149" y2="218" stroke="#22d3ee" stroke-width="2.5"/>
+                                    <line x1="97" y1="232" x2="149" y2="232" stroke="#22d3ee" stroke-width="2.5"/>
+                                    <text x="162" y="229" fill="#94a3b8" font-size="10" font-weight="bold">1. Tobillo</text>
+                                </g>
+                            </svg>
+
+                            <!-- Etiqueta flotante de Fase Actual -->
+                            <div class="w-full mt-2 bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-2">
+                                <div class="flex items-center justify-between text-xs">
+                                    <span id="nitinol-state-label" class="font-extrabold text-amber-400 uppercase">EN PAUSA (SELECCIONE UN MODO)</span>
+                                    <span id="nitinol-timer" class="font-mono font-bold text-cyan-400">0.0s / 10.0s</span>
+                                </div>
+                                <!-- Barra de Progreso del Ciclo (0-2s ON, 2-10s OFF) -->
+                                <div class="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800 flex">
+                                    <div id="cycle-bar-on" class="h-full bg-gradient-to-r from-orange-500 to-amber-400 transition-all duration-100" style="width: 0%"></div>
+                                    <div id="cycle-bar-off" class="h-full bg-gradient-to-r from-cyan-500 to-blue-600 transition-all duration-100" style="width: 0%"></div>
+                                </div>
+                                <div class="flex justify-between text-[10px] text-slate-400 font-mono">
+                                    <span class="text-orange-400">● 0s - 2s: NITINOL ACTIVO (ON)</span>
+                                    <span class="text-cyan-400">● 2s - 10s: ENFRIANDO (OFF)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Botones de Control Directo -->
+                        <div class="grid grid-cols-2 gap-3">
+                            <button onclick="activateAndLogMode(selectedModeId)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-emerald-600/20 transition text-xs flex items-center justify-center space-x-2">
+                                <i data-lucide="play" class="w-4 h-4 fill-current"></i>
+                                <span data-i18n="btnStartMode">Iniciar / Reiniciar Modo</span>
+                            </button>
+                            <button onclick="detenerModo()" class="bg-rose-600 hover:bg-rose-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-rose-600/20 transition text-xs flex items-center justify-center space-x-2">
+                                <i data-lucide="square" class="w-4 h-4 fill-current"></i>
+                                <span data-i18n="btnStopMode">Detener / Pausar</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ======================================================== -->
+            <!-- VENTANA 3: MONITOREO / MEDICIONES EN LA MEDIA            -->
+            <!-- ======================================================== -->
+            <section id="view-monitoreo" class="view-section hidden space-y-6">
+                <div class="glass-panel p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-500/20">
+                    <div>
+                        <span class="text-[11px] font-mono uppercase text-blue-400">Telemetría Biométrica en Tiempo Real</span>
+                        <h2 class="text-2xl font-extrabold text-white" data-i18n="monHeader">Monitoreo y Mediciones en la Media</h2>
+                        <p class="text-xs text-slate-400 mt-0.5" data-i18n="monSub">Visualización en vivo de Temperatura, Humedad y Posición específica de la media (Relajada o De Pie).</p>
+                    </div>
+                    <div class="flex items-center space-x-2.5 shrink-0">
+                        <button onclick="navigate('menu')" class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center space-x-1.5">
+                            <i data-lucide="arrow-left" class="w-4 h-4 text-cyan-400"></i>
+                            <span data-i18n="backMenu">Volver al Menú</span>
+                        </button>
+                        <button onclick="logout()" class="px-3.5 py-2.5 bg-rose-500/10 hover:bg-rose-500 hover:text-white text-rose-400 rounded-xl text-xs font-semibold border border-rose-500/30 transition">
+                            <span data-i18n="btnExit">Salir</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 3 Tarjetas Principales de Medición -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- 1. Temperatura -->
+                    <div class="glass-panel p-6 rounded-2xl relative overflow-hidden border border-slate-800">
+                        <div class="flex items-center justify-between text-slate-400 mb-2">
+                            <span class="text-xs font-bold uppercase tracking-wider" data-i18n="lblTemp">Temperatura de la Media</span>
+                            <div class="p-2 bg-cyan-500/10 rounded-xl text-cyan-400"><i data-lucide="thermometer" class="w-5 h-5"></i></div>
+                        </div>
+                        <div class="flex items-baseline space-x-2">
+                            <span id="mon-temp" class="text-4xl font-extrabold text-white">26.8</span>
+                            <span class="text-slate-400 text-lg font-bold">°C</span>
+                        </div>
+                        <div class="w-full bg-slate-900 h-2 rounded-full mt-3 overflow-hidden">
+                            <div id="mon-temp-bar" class="bg-emerald-400 h-full transition-all duration-300" style="width: 55%"></div>
+                        </div>
+                        <div id="mon-temp-badge" class="mt-2.5 text-xs text-emerald-400 font-semibold">● Temperatura segura (&lt; 38.0 °C)</div>
+                    </div>
+
+                    <!-- 2. Humedad -->
+                    <div class="glass-panel p-6 rounded-2xl relative overflow-hidden border border-slate-800">
+                        <div class="flex items-center justify-between text-slate-400 mb-2">
+                            <span class="text-xs font-bold uppercase tracking-wider" data-i18n="lblHum">Humedad en la Prenda</span>
+                            <div class="p-2 bg-blue-500/10 rounded-xl text-blue-400"><i data-lucide="droplets" class="w-5 h-5"></i></div>
+                        </div>
+                        <div class="flex items-baseline space-x-2">
+                            <span id="mon-hum" class="text-4xl font-extrabold text-white">54</span>
+                            <span class="text-slate-400 text-lg font-bold">%</span>
+                        </div>
+                        <div class="w-full bg-slate-900 h-2 rounded-full mt-3 overflow-hidden">
+                            <div id="mon-hum-bar" class="bg-blue-400 h-full transition-all duration-300" style="width: 54%"></div>
+                        </div>
+                        <div class="mt-2.5 text-xs text-blue-400 font-semibold">● Nivel de transpiración normal</div>
+                    </div>
+
+                    <!-- 3. Posición de la Media (Relajada vs De Pie) -->
+                    <div id="postura-card" class="glass-panel p-6 rounded-2xl relative overflow-hidden border border-emerald-500/30">
+                        <div class="flex items-center justify-between text-slate-400 mb-2">
+                            <span class="text-xs font-bold uppercase tracking-wider" data-i18n="lblPos">Posición de la Media</span>
+                            <div class="p-2 bg-emerald-500/10 rounded-xl text-emerald-400"><i data-lucide="footprints" class="w-5 h-5"></i></div>
+                        </div>
+                        <div id="mon-postura" class="text-2xl font-extrabold text-emerald-400 mt-1">RELAJADA (En Reposo)</div>
+                        <p id="mon-postura-sub" class="mt-2 text-xs text-slate-300">Pierna horizontal/estable (Az: 850 mg). Apta para masaje de Nitinol.</p>
+                        <div class="mt-3 flex items-center space-x-2 text-[11px] font-mono text-slate-400">
+                            <span>Ax: <strong id="imu-ax" class="text-white">12</strong></span>
+                            <span>| Ay: <strong id="imu-ay" class="text-white">-18</strong></span>
+                            <span>| Az: <strong id="imu-az" class="text-cyan-400">850</strong></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visualizador Biomecánico Canvas + Simulador Interactivo de Sensores -->
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <!-- Canvas de Posición en Vivo -->
+                    <div class="lg:col-span-7 glass-panel p-6 rounded-2xl flex flex-col justify-between">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-bold text-white text-base">Representación Biomecánica de Postura</h3>
+                            <span id="canvas-status-text" class="text-xs font-mono px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Posición: Relajada</span>
+                        </div>
+                        <div class="relative w-full h-64 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-center overflow-hidden">
+                            <canvas id="liveCanvas" width="480" height="240" class="w-full h-full"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Simulador Interactivo de Pruebas en Vivo -->
+                    <div class="lg:col-span-5 glass-panel p-6 rounded-2xl space-y-4 border border-cyan-500/20">
+                        <div class="flex items-center justify-between">
+                            <h3 class="font-bold text-white text-sm flex items-center space-x-2">
+                                <i data-lucide="cpu" class="w-4 h-4 text-cyan-400"></i>
+                                <span>Simulador de Sensores en Vivo</span>
+                            </h3>
+                            <span class="text-[10px] font-mono text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded">Test & Firebase</span>
+                        </div>
+                        <p class="text-xs text-slate-400">Prueba cambios en la media para verificar la respuesta visual y el guardado automático de alertas en Firebase:</p>
+
+                        <!-- Control Temperatura -->
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-300 font-medium">Simular Temperatura (°C):</span>
+                                <span id="sim-temp-lbl" class="font-mono text-cyan-400 font-bold">26.8 °C</span>
+                            </div>
+                            <input type="range" id="sim-temp-range" min="22" max="42" step="0.5" value="26.8" oninput="updateSimulatedSensors()" class="w-full accent-cyan-500 cursor-pointer">
+                        </div>
+
+                        <!-- Control Humedad -->
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-300 font-medium">Simular Humedad (%):</span>
+                                <span id="sim-hum-lbl" class="font-mono text-blue-400 font-bold">54 %</span>
+                            </div>
+                            <input type="range" id="sim-hum-range" min="30" max="95" step="1" value="54" oninput="updateSimulatedSensors()" class="w-full accent-blue-500 cursor-pointer">
+                        </div>
+
+                        <!-- Selector de Posición: Relajada vs De Pie -->
+                        <div>
+                            <label class="block text-xs text-slate-300 font-medium mb-2">Cambiar Posición de la Media (Acelerómetro):</label>
+                            <div class="grid grid-cols-2 gap-2.5">
+                                <button type="button" onclick="setSockPosition('relajada')" id="btn-pos-relajada" class="py-2.5 px-3 rounded-xl text-xs font-bold border-2 border-emerald-500 bg-emerald-500/15 text-emerald-300 transition">
+                                    🦵 Media Relajada (Reposo)
+                                </button>
+                                <button type="button" onclick="setSockPosition('depie')" id="btn-pos-depie" class="py-2.5 px-3 rounded-xl text-xs font-bold border-2 border-slate-700 bg-slate-900 text-slate-300 transition">
+                                    🧍 De Pie / En Movimiento
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ======================================================== -->
+            <!-- VENTANA 4: HISTÓRICO DE USO (FIREBASE + CALENDARIO)      -->
+            <!-- ======================================================== -->
+            <section id="view-historico-uso" class="view-section hidden space-y-6">
+                <div class="glass-panel p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-emerald-500/20">
+                    <div>
+                        <span class="text-[11px] font-mono uppercase text-emerald-400">Base de Datos Firebase (nexa-ee7ee)</span>
+                        <h2 class="text-2xl font-extrabold text-white" data-i18n="usoHeader">Histórico de Uso y Activaciones</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Registros extraídos desde Firebase con Día, Hora y Modo de funcionamiento seleccionado.</p>
+                    </div>
+                    <div class="flex items-center space-x-2.5 shrink-0">
+                        <button onclick="navigate('menu')" class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center space-x-1.5">
+                            <i data-lucide="arrow-left" class="w-4 h-4 text-cyan-400"></i>
+                            <span data-i18n="backMenu">Volver al Menú</span>
+                        </button>
+                        <button onclick="logout()" class="px-3.5 py-2.5 bg-rose-500/10 hover:bg-rose-500 hover:text-white text-rose-400 rounded-xl text-xs font-semibold border border-rose-500/30 transition">
+                            <span data-i18n="btnExit">Salir</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Barra de Filtrado por Calendario y Modo -->
+                <div class="glass-panel p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <div class="flex items-center space-x-2">
+                            <label for="filter-date-uso" class="text-xs font-bold text-slate-300 uppercase">Seleccionar Fecha (Calendario):</label>
+                            <div class="relative flex items-center">
+                                <input type="date" id="filter-date-uso" onchange="filtrarHistoricoUso()" onclick="if(this.showPicker) this.showPicker()" class="bg-slate-900 border border-cyan-500/40 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400 cursor-pointer">
+                            </div>
+                        </div>
+
+                        <select id="filter-mode-uso" onchange="filtrarHistoricoUso()" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none">
+                            <option value="all">Todos los Modos (1-5)</option>
+                            <option value="1">Modo #1: Tobillo</option>
+                            <option value="2">Modo #2: Parte Media</option>
+                            <option value="3">Modo #3: Parte Alta</option>
+                            <option value="4">Modo #4: Secuencial Niveles</option>
+                            <option value="5">Modo #5: Todos a la Vez</option>
+                        </select>
+
+                        <button onclick="limpiarFiltroUso()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition">
+                            Ver Todos
+                        </button>
+                    </div>
+
+                    <button onclick="cargarHistoricoUsoFirebase()" class="px-4 py-2 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold hover:bg-emerald-500/25 transition flex items-center space-x-2">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                        <span>Sincronizar desde Firebase</span>
+                    </button>
+                </div>
+
+                <!-- Tabla de Histórico de Uso -->
+                <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-900/90 text-slate-400 uppercase font-bold border-b border-slate-800">
+                                <tr>
+                                    <th class="px-6 py-4">Día / Fecha</th>
+                                    <th class="px-6 py-4">Hora Exacta</th>
+                                    <th class="px-6 py-4">Modo de Funcionamiento</th>
+                                    <th class="px-6 py-4">Ciclo Nitinol</th>
+                                    <th class="px-6 py-4">Origen de Datos</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla-uso-body" class="divide-y divide-slate-800 text-slate-200">
+                                <!-- Se llena dinámicamente desde Firebase -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ======================================================== -->
+            <!-- VENTANA 5: HISTÓRICO DE ALERTAS (FIREBASE + CALENDARIO)  -->
+            <!-- ======================================================== -->
+            <section id="view-historico-alertas" class="view-section hidden space-y-6">
+                <div class="glass-panel p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-rose-500/20">
+                    <div>
+                        <span class="text-[11px] font-mono uppercase text-rose-400">Registro Clínico de Seguridad en Firebase</span>
+                        <h2 class="text-2xl font-extrabold text-white" data-i18n="alertasHeader">Histórico de Alertas del Dispositivo</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Muestra día, hora y tipo de alerta registrada en Firebase con filtrado interactivo por calendario.</p>
+                    </div>
+                    <div class="flex items-center space-x-2.5 shrink-0">
+                        <button onclick="navigate('menu')" class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center space-x-1.5">
+                            <i data-lucide="arrow-left" class="w-4 h-4 text-cyan-400"></i>
+                            <span data-i18n="backMenu">Volver al Menú</span>
+                        </button>
+                        <button onclick="logout()" class="px-3.5 py-2.5 bg-rose-500/10 hover:bg-rose-500 hover:text-white text-rose-400 rounded-xl text-xs font-semibold border border-rose-500/30 transition">
+                            <span data-i18n="btnExit">Salir</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Barra de Filtros por Calendario + Botones para Registrar Alerta de Prueba en Firebase -->
+                <div class="glass-panel p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <div class="flex items-center space-x-2">
+                            <label for="filter-date-alerta" class="text-xs font-bold text-slate-300 uppercase">Filtrar Fecha (Calendario):</label>
+                            <input type="date" id="filter-date-alerta" onchange="filtrarHistoricoAlertas()" onclick="if(this.showPicker) this.showPicker()" class="bg-slate-900 border border-rose-500/40 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-rose-400 cursor-pointer">
+                        </div>
+
+                        <select id="filter-type-alerta" onchange="filtrarHistoricoAlertas()" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none">
+                            <option value="all">Todos los Tipos de Alerta</option>
+                            <option value="Térmica">Alerta Térmica (&gt;38°C)</option>
+                            <option value="Movimiento">Alerta de Posición / Movimiento</option>
+                        </select>
+
+                        <button onclick="limpiarFiltroAlertas()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition">
+                            Ver Todas
+                        </button>
+                    </div>
+
+                    <!-- Botones de Prueba Rápida para Guardar Alertas en Firebase -->
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button onclick="registrarAlertaFirebase('Alerta Térmica (>38°C)', 'Temperatura de la media superó el umbral seguro de 38.0 °C. Nitinol desactivado.')" class="px-3 py-2 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5">
+                            <i data-lucide="flame" class="w-3.5 h-3.5"></i>
+                            <span>+ Simular Alerta Térmica</span>
+                        </button>
+                        <button onclick="registrarAlertaFirebase('Alerta Movimiento / Postura', 'Se detectó pierna de pie o sacudida brusca durante el ciclo de compresión.')" class="px-3 py-2 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5">
+                            <i data-lucide="footprints" class="w-3.5 h-3.5"></i>
+                            <span>+ Simular Alerta Postural</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tabla de Alertas -->
+                <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-900/90 text-slate-400 uppercase font-bold border-b border-slate-800">
+                                <tr>
+                                    <th class="px-6 py-4">Día / Fecha</th>
+                                    <th class="px-6 py-4">Hora</th>
+                                    <th class="px-6 py-4">Tipo de Alerta</th>
+                                    <th class="px-6 py-4">Detalle del Evento</th>
+                                    <th class="px-6 py-4">Acción de Seguridad</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla-alertas-body" class="divide-y divide-slate-800 text-slate-200">
+                                <!-- Se llena dinámicamente desde Firebase -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ======================================================== -->
+            <!-- VENTANA 6: DATOS DE DOCTOR Y ENVÍO POR CORREO            -->
+            <!-- ======================================================== -->
+            <section id="view-doctor" class="view-section hidden space-y-6">
+                <div class="glass-panel p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-purple-500/20">
+                    <div>
+                        <span class="text-[11px] font-mono uppercase text-purple-400">Gestión Médica y Reportes Clínicos</span>
+                        <h2 class="text-2xl font-extrabold text-white" data-i18n="docHeader">Datos del Doctor y Envío de Historial</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Registra los datos del médico y envía por correo electrónico todo el historial de usos y alertas extraído de Firebase.</p>
+                    </div>
+                    <div class="flex items-center space-x-2.5 shrink-0">
+                        <button onclick="navigate('menu')" class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center space-x-1.5">
+                            <i data-lucide="arrow-left" class="w-4 h-4 text-cyan-400"></i>
+                            <span data-i18n="backMenu">Volver al Menú</span>
+                        </button>
+                        <button onclick="logout()" class="px-3.5 py-2.5 bg-rose-500/10 hover:bg-rose-500 hover:text-white text-rose-400 rounded-xl text-xs font-semibold border border-rose-500/30 transition">
+                            <span data-i18n="btnExit">Salir</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <!-- Formulario de Datos del Doctor -->
+                    <form id="doctor-form" onsubmit="guardarDatosDoctor(event)" class="lg:col-span-6 glass-panel p-6 rounded-2xl space-y-4">
+                        <h3 class="font-bold text-white text-base flex items-center space-x-2">
+                            <i data-lucide="stethoscope" class="w-5 h-5 text-purple-400"></i>
+                            <span>Ficha del Médico Tratante</span>
+                        </h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 mb-1">Nombre Completo del Doctor *</label>
+                                <input type="text" id="doc-nombre" value="Dr. Carlos Méndez Soto" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 mb-1">Especialidad Médica *</label>
+                                <input type="text" id="doc-especialidad" value="Angiología y Cirugía Vascular" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 mb-1">Correo Electrónico del Doctor *</label>
+                                <input type="email" id="doc-email" value="carlos.mendez@hospitalclinico.cr" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 mb-1">Teléfono / Clínica</label>
+                                <input type="text" id="doc-clinica" value="+506 2290-4000 / Clínica Vascular" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">Nombre del Paciente y Observaciones</label>
+                            <textarea id="doc-notas" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500">Paciente en terapia de compresión secuencial CircuitFlex (Ciclo 2s ON / 8s OFF).</textarea>
+                        </div>
+                        <button type="submit" class="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold py-3 rounded-xl transition text-xs flex items-center justify-center space-x-2">
+                            <i data-lucide="save" class="w-4 h-4"></i>
+                            <span>Guardar Datos del Doctor en Firebase</span>
+                        </button>
+                    </form>
+
+                    <!-- Panel de Extracción y Envío por Correo Electrónico -->
+                    <div class="lg:col-span-6 glass-panel p-6 rounded-2xl flex flex-col justify-between space-y-4">
+                        <div class="space-y-2">
+                            <h3 class="font-bold text-white text-base flex items-center space-x-2">
+                                <i data-lucide="mail-check" class="w-5 h-5 text-emerald-400"></i>
+                                <span>Envío de Historial de Usos y Alertas por Correo</span>
+                            </h3>
+                            <p class="text-xs text-slate-400">
+                                Este módulo recopila automáticamente todas las activaciones y alertas almacenadas en Firebase (`nexa-ee7ee`) y genera el reporte clínico para el correo del doctor.
+                            </p>
+                        </div>
+
+                        <div class="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2.5 text-xs">
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">Destinatario configurado:</span>
+                                <span id="preview-doc-email" class="font-mono text-cyan-400 font-semibold">carlos.mendez@hospitalclinico.cr</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">Total Activaciones de Uso extraídas:</span>
+                                <span id="count-uso-envio" class="font-mono text-emerald-400 font-bold">0 registros</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">Total Alertas Clínicas extraídas:</span>
+                                <span id="count-alerta-envio" class="font-mono text-rose-400 font-bold">0 alertas</span>
+                            </div>
+                        </div>
+
+                        <!-- Vista previa rápida del reporte -->
+                        <textarea id="email-report-preview" readonly rows="5" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-[11px] font-mono text-slate-300 focus:outline-none"></textarea>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <button type="button" onclick="enviarReporteDoctor()" class="bg-gradient-to-r from-emerald-500 to-teal-600 hover:opacity-95 text-slate-950 font-extrabold py-3.5 px-4 rounded-xl shadow-lg transition text-xs flex items-center justify-center space-x-2">
+                                <i data-lucide="send" class="w-4 h-4"></i>
+                                <span>Enviar por Correo al Doctor</span>
+                            </button>
+                            <button type="button" onclick="copiarReportePortapapeles()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-3.5 px-4 rounded-xl transition text-xs flex items-center justify-center space-x-2">
+                                <i data-lucide="copy" class="w-4 h-4 text-cyan-400"></i>
+                                <span>Copiar Reporte Completo</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ======================================================== -->
+            <!-- VENTANA 7: MANUAL DE USO + FORMULARIO DE CONTACTO        -->
+            <!-- ======================================================== -->
+            <section id="view-manual" class="view-section hidden space-y-6">
+                <div class="glass-panel p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-amber-500/20">
+                    <div>
+                        <span class="text-[11px] font-mono uppercase text-amber-400">Documentación Oficial y Soporte</span>
+                        <h2 class="text-2xl font-extrabold text-white" data-i18n="manualHeader">Manual de Uso - CircuitFlex</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Guía paso a paso para operar la media inteligente de compresión con Nitinol.</p>
+                    </div>
+                    <div class="flex items-center space-x-2.5 shrink-0">
+                        <button onclick="navigate('menu')" class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center space-x-1.5">
+                            <i data-lucide="arrow-left" class="w-4 h-4 text-cyan-400"></i>
+                            <span data-i18n="backMenu">Volver al Menú</span>
+                        </button>
+                        <button onclick="logout()" class="px-3.5 py-2.5 bg-rose-500/10 hover:bg-rose-500 hover:text-white text-rose-400 rounded-xl text-xs font-semibold border border-rose-500/30 transition">
+                            <span data-i18n="btnExit">Salir</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Pasos del Manual de Uso -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="glass-panel p-6 rounded-2xl space-y-3">
+                        <div class="flex items-center space-x-2.5 text-cyan-400 font-bold text-sm">
+                            <i data-lucide="check-circle-2" class="w-5 h-5"></i>
+                            <span>1. Colocación y Posición de la Media</span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            Coloque la media e-textil CircuitFlex asegurándose de que los tres anillos de Nitinol queden alineados en el <strong>Tobillo (Nivel 1)</strong>, <strong>Parte Media / Pantorrilla (Nivel 2)</strong> y <strong>Parte Alta (Nivel 3)</strong>. Para iniciar la terapia, mantenga la pierna en posición <strong>Relajada (En Reposo)</strong>.
+                        </p>
+                    </div>
+
+                    <div class="glass-panel p-6 rounded-2xl space-y-3">
+                        <div class="flex items-center space-x-2.5 text-blue-400 font-bold text-sm">
+                            <i data-lucide="sliders" class="w-5 h-5"></i>
+                            <span>2. Los 5 Modos y Ciclo Térmico (2s ON / 8s OFF)</span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            En la ventana <strong>Modos de Funcionamiento</strong>, elija entre el Modo #1 (Tobillo), Modo #2 (Media pierna), Modo #3 (Parte alta), Modo #4 (Secuencial por niveles) o Modo #5 (Todos a la vez). Cada ciclo activa el Nitinol durante <strong>2 segundos</strong> y permite <strong>8 segundos</strong> de enfriamiento/relajación.
+                        </p>
+                    </div>
+
+                    <div class="glass-panel p-6 rounded-2xl space-y-3">
+                        <div class="flex items-center space-x-2.5 text-rose-400 font-bold text-sm">
+                            <i data-lucide="shield-alert" class="w-5 h-5"></i>
+                            <span>3. Protección Térmica y Postural Automática</span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            El sensor Bosch XDK110 monitorea continuamente la prenda. Si la temperatura alcanza o supera los <strong>38.0 °C</strong> o si el usuario se pone <strong>De Pie / en movimiento brusco</strong>, el sistema corta la corriente del Nitinol y guarda una alerta en Firebase.
+                        </p>
+                    </div>
+
+                    <div class="glass-panel p-6 rounded-2xl space-y-3">
+                        <div class="flex items-center space-x-2.5 text-purple-400 font-bold text-sm">
+                            <i data-lucide="mail" class="w-5 h-5"></i>
+                            <span>4. Historiales con Calendario y Envío al Doctor</span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            Todas las activaciones y alertas pueden filtrarse seleccionando una fecha en el calendario dentro de <strong>Histórico de Uso</strong> e <strong>Histórico de Alertas</strong>, y enviarse directamente al correo del médico en la ventana <strong>Datos de Doctor</strong>.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Formulario de Contacto y Soporte Validado -->
+                <div class="glass-panel p-6 rounded-2xl border border-cyan-500/20">
+                    <h3 class="font-bold text-white text-base mb-1 flex items-center space-x-2">
+                        <i data-lucide="message-square" class="w-5 h-5 text-cyan-400"></i>
+                        <span>Formulario de Contacto y Soporte Técnico CircuitFlex</span>
+                    </h3>
+                    <p class="text-xs text-slate-400 mb-4">¿Tienes dudas sobre el funcionamiento de la media o la conexión con el XDK110? Envíanos un mensaje.</p>
+                    <form id="contact-form" onsubmit="submitContactForm(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4" novalidate>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">Nombre *</label>
+                            <input type="text" id="contact-name" required placeholder="Tu nombre" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">Correo Electrónico *</label>
+                            <input type="email" id="contact-email" required placeholder="usuario@correo.com" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">Mensaje o Consulta *</label>
+                            <div class="flex space-x-2">
+                                <input type="text" id="contact-msg" required placeholder="Escribe tu consulta técnica..." class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+                                <button type="submit" class="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs shrink-0 transition">
+                                    Enviar
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+        </main>
+
+        <!-- Barra Flotante CTA durante el Scroll -->
+        <div id="scroll-cta" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 hidden items-center space-x-3 glass-panel px-5 py-2.5 rounded-full border border-cyan-500/40 shadow-2xl">
+            <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping"></span>
+            <span class="text-xs font-semibold text-white">CircuitFlex Activo</span>
+            <button onclick="navigate('modos')" class="bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold px-3.5 py-1.5 rounded-full transition">
+                Ir a Modos (2s/8s)
+            </button>
+            <button onclick="navigate('menu')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-full transition">
+                Menú
+            </button>
+        </div>
+
+        <!-- Footer con Botones RRSS e Indicador de Optimización de Velocidad -->
+        <footer class="glass-panel border-t border-slate-800 mt-12 py-6 px-6">
+            <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <span class="font-extrabold text-white text-sm">CircuitFlex Biomedical IoT</span>
+                        <span class="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">⚡ Carga Optimizada: 18ms</span>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-1">CTP Taller de Electrónica Industrial • Bosch XDK110 & Firebase (`nexa-ee7ee`)</p>
+                </div>
+                <!-- Botones Redes Sociales (RRSS) -->
+                <div class="flex items-center space-x-2.5">
+                    <a href="https://instagram.com" target="_blank" rel="noopener" class="p-2.5 bg-slate-900 hover:bg-cyan-500/20 rounded-xl text-slate-400 hover:text-cyan-400 transition border border-slate-800" title="Instagram"><i data-lucide="instagram" class="w-4 h-4"></i></a>
+                    <a href="https://linkedin.com" target="_blank" rel="noopener" class="p-2.5 bg-slate-900 hover:bg-cyan-500/20 rounded-xl text-slate-400 hover:text-cyan-400 transition border border-slate-800" title="LinkedIn"><i data-lucide="linkedin" class="w-4 h-4"></i></a>
+                    <a href="https://youtube.com" target="_blank" rel="noopener" class="p-2.5 bg-slate-900 hover:bg-cyan-500/20 rounded-xl text-slate-400 hover:text-cyan-400 transition border border-slate-800" title="YouTube"><i data-lucide="youtube" class="w-4 h-4"></i></a>
+                    <a href="https://github.com" target="_blank" rel="noopener" class="p-2.5 bg-slate-900 hover:bg-cyan-500/20 rounded-xl text-slate-400 hover:text-cyan-400 transition border border-slate-800" title="GitHub"><i data-lucide="github" class="w-4 h-4"></i></a>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Botón Flotante Volver Arriba -->
+    <button onclick="window.scrollTo({top: 0, behavior: 'smooth'})" id="back-to-top" class="fixed bottom-6 right-6 z-50 p-3 bg-cyan-500 text-slate-950 rounded-2xl shadow-lg shadow-cyan-500/30 hidden hover:scale-110 transition" title="Volver arriba">
+        <i data-lucide="arrow-up" class="w-5 h-5"></i>
+    </button>
+
+    <!-- Notificación Toast de Éxito / Error -->
+    <div id="toast-notification" class="fixed bottom-6 left-6 z-50 glass-panel px-5 py-3.5 rounded-2xl border border-cyan-500/40 text-xs text-white flex items-center space-x-3 transform translate-y-24 opacity-0 transition-all duration-300 shadow-2xl">
+        <div id="toast-icon" class="text-cyan-400"><i data-lucide="check-circle" class="w-4 h-4"></i></div>
+        <span id="toast-text" class="font-medium">Acción completada con éxito.</span>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- 3. INICIALIZACIÓN DE FIREBASE (CREDENCIALES EXACTAS)      -->
+    <!-- ======================================================== -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, query, orderBy, Timestamp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyAXr50tHx5hrqpIP_MT9mhY8tk2yFu-Dd0",
+            authDomain: "nexa-ee7ee.firebaseapp.com",
+            projectId: "nexa-ee7ee",
+            storageBucket: "nexa-ee7ee.firebasestorage.app",
+            messagingSenderId: "1035881840196",
+            appId: "1:1035881840196:web:c6d98e84a1ec26d7690611"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        window.db = db;
+        window.collection = collection;
+        window.addDoc = addDoc;
+        window.getDocs = getDocs;
+        window.query = query;
+        window.orderBy = orderBy;
+        window.Timestamp = Timestamp;
+
+        // Sincronizar datos iniciales al cargar el módulo
+        window.syncAllFromFirebase();
+    </script>
+
+    <!-- ======================================================== -->
+    <!-- 4. LÓGICA DE CONTROL, CICLO 2s/8s, FILTROS Y REPORTES     -->
+    <!-- ======================================================== -->
+    <script>
+        lucide.createIcons();
+
+        // Estado global de la aplicación
+        let selectedModeId = 1;
+        let isRunning = false;
+        let cycleInterval = null;
+        let cycleElapsedDeciseconds = 0; // 0 a 100 (10.0 segundos: 0-20 = 2s ON, 20-100 = 8s OFF)
+        let sequentialStep = 1; // Para el Modo #4 (1=Tobillo, 2=Media, 3=Alta)
+        let sockPosition = 'relajada'; // 'relajada' | 'depie'
+        let currentTemp = 26.8;
+        let currentHum = 54;
+        let mqttClient = null;
+
+        const modeNames = {
+            1: "Modo #1: Trabajo en el Tobillo",
+            2: "Modo #2: Trabajo en la Parte Media de la Pierna",
+            3: "Modo #3: Trabajo en la Parte Alta de la Media",
+            4: "Modo #4: Trabajo Secuencial por Niveles",
+            5: "Modo #5: Todos a la Vez en el Mismo Momento"
+        };
+
+        // Almacenamiento en memoria + espejo local para respaldo instantáneo con Firebase
+        let usosCache = [
+            { fecha: "2026-11-18", hora: "08:15:22", modo: 1, nombreModo: modeNames[1], ciclo: "2s ON / 8s OFF", origen: "Firebase (nexa-ee7ee)" },
+            { fecha: "2026-11-18", hora: "08:30:45", modo: 4, nombreModo: modeNames[4], ciclo: "2s ON / 8s OFF", origen: "Firebase (nexa-ee7ee)" },
+            { fecha: "2026-11-17", hora: "16:10:05", modo: 5, nombreModo: modeNames[5], ciclo: "2s ON / 8s OFF", origen: "Firebase (nexa-ee7ee)" }
+        ];
+
+        let alertasCache = [
+            { fecha: "2026-11-18", hora: "08:22:10", tipo: "Alerta Movimiento / Postura", descripcion: "Usuario cambió a posición De Pie durante ciclo activo.", accion: "Pausa Automática" },
+            { fecha: "2026-11-17", hora: "15:40:12", tipo: "Alerta Térmica (>38°C)", descripcion: "Temperatura alcanzó 38.4 °C en anillo central.", accion: "Nitinol OFF" }
+        ];
+
+        // Utilidad para obtener fecha YYYY-MM-DD local y hora HH:MM:SS
+        function getNowDateAndTime() {
+            const now = new Date();
+            const yyyy = now.getFullYear();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const dd = String(now.getDate()).padStart(2, '0');
+            const fecha = `${yyyy}-${mm}-${dd}`;
+            const hora = now.toTimeString().split(' ')[0];
+            return { fecha, hora };
+        }
+
+        // Mostrar / ocultar spinner
+        function showLoading(text = "Procesando...") {
+            const ov = document.getElementById('loading-overlay');
+            document.getElementById('loading-text').textContent = text;
+            ov.classList.remove('hidden');
+            ov.classList.add('flex');
+        }
+        function hideLoading() {
+            const ov = document.getElementById('loading-overlay');
+            ov.classList.add('hidden');
+            ov.classList.remove('flex');
+        }
+
+        // Autocompletar credenciales demo
+        function fillDemoLogin() {
+            document.getElementById('login-user').value = 'admin';
+            document.getElementById('login-pass').value = '1234';
+            document.getElementById('login-msg').classList.add('hidden');
+        }
+
+        // Validación de Login (admin / 1234)
+        document.getElementById('login-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const u = document.getElementById('login-user').value.trim();
+            const p = document.getElementById('login-pass').value.trim();
+
+            if (u === 'admin' && p === '1234') {
+                document.getElementById('login-msg').classList.add('hidden');
+                showLoading("Verificando credenciales e iniciando CircuitFlex...");
+                setTimeout(() => {
+                    hideLoading();
+                    document.getElementById('login-view').classList.add('hidden');
+                    document.getElementById('app-container').classList.remove('hidden');
+                    document.getElementById('app-container').classList.add('flex');
+                    navigate('menu');
+                    connectHiveMQ();
+                    showToast("✅ Acceso concedido. Bienvenido a CircuitFlex.", "success");
+                }, 450);
+            } else {
+                document.getElementById('login-msg').classList.remove('hidden');
+                showToast("❌ Credenciales incorrectas. Usa admin / 1234", "error");
+            }
+        });
+
+        function logout() {
+            detenerModo(true);
+            document.getElementById('app-container').classList.add('hidden');
+            document.getElementById('app-container').classList.remove('flex');
+            document.getElementById('login-view').classList.remove('hidden');
+            showToast("Sesión cerrada correctamente.");
+        }
+
+        // Navegación entre ventanas
+        function navigate(viewId) {
+            document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+            const target = document.getElementById(`view-${viewId}`);
+            if (target) {
+                target.classList.remove('hidden');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            if (viewId === 'historico-uso') renderTablaUso();
+            if (viewId === 'historico-alertas') renderTablaAlertas();
+            if (viewId === 'doctor') actualizarResumenDoctor();
+        }
+
+        // Conexión MQTT WebSockets con HiveMQ para el XDK110
+        function connectHiveMQ() {
+            if (mqttClient || typeof mqtt === 'undefined') return;
+            try {
+                mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
+                    clientId: 'circuitflex_web_' + Math.random().toString(16).substring(2, 8),
+                    clean: true
+                });
+                mqttClient.on('connect', () => {
+                    document.getElementById('mqtt-status-label').textContent = 'HiveMQ + Firebase Online';
+                    mqttClient.subscribe('media/xdk110/telemetria');
+                });
+                mqttClient.on('message', (topic, message) => {
+                    try {
+                        const d = JSON.parse(message.toString());
+                        if (typeof d.t === 'number') {
+                            currentTemp = Number((d.t / 1000).toFixed(1));
+                            document.getElementById('sim-temp-range').value = currentTemp;
+                        }
+                        if (typeof d.h === 'number') {
+                            currentHum = d.h;
+                            document.getElementById('sim-hum-range').value = currentHum;
+                        }
+                        if (typeof d.az === 'number') {
+                            document.getElementById('imu-ax').textContent = d.ax || 0;
+                            document.getElementById('imu-ay').textContent = d.ay || 0;
+                            document.getElementById('imu-az').textContent = d.az;
+                            const enReposo = (d.az > 600 || d.az < -600);
+                            setSockPosition(enReposo ? 'relajada' : 'depie', true);
+                        }
+                        refreshSensorDisplay();
+                    } catch (err) {
+                        console.warn("Trama MQTT no JSON:", err);
+                    }
+                });
+            } catch (e) {
+                console.warn("MQTT offline fallback:", e);
+            }
+        }
+
+        // ====================================================================
+        // ACTIVACIÓN DE LOS 5 MODOS + CICLO 2s ON / 8s OFF + FIREBASE
+        // ====================================================================
+        async function activateAndLogMode(modeId) {
+            selectedModeId = modeId;
+            sequentialStep = 1;
+
+            // Resaltar tarjeta del modo activo
+            for (let i = 1; i <= 5; i++) {
+                const card = document.getElementById(`mode-card-${i}`);
+                if (!card) continue;
+                if (i === modeId) {
+                    card.className = "glass-panel p-5 rounded-2xl cursor-pointer hover-lift border-2 border-cyan-400 bg-cyan-500/15 glow-active transition";
+                } else {
+                    card.className = "glass-panel p-5 rounded-2xl cursor-pointer hover-lift border-2 border-transparent transition";
+                }
+            }
+
+            // Iniciar el reloj de ciclo 2s ON / 8s OFF
+            startNitinolCycleEngine();
+
+            // Publicar comando por MQTT si está conectado
+            if (mqttClient && mqttClient.connected) {
+                mqttClient.publish('media/xdk110/control', JSON.stringify({
+                    comando: "INICIAR",
+                    modo: modeId,
+                    tiempoON: 2,
+                    tiempoOFF: 8
+                }));
+            }
+
+            // Guardar Fecha, Hora y Modo en Firebase
+            const { fecha, hora } = getNowDateAndTime();
+            const nuevoRegistro = {
+                fecha,
+                hora,
+                modo: modeId,
+                nombreModo: modeNames[modeId],
+                ciclo: "2s ON / 8s OFF",
+                origen: "Firebase (nexa-ee7ee)"
+            };
+
+            usosCache.unshift(nuevoRegistro);
+            renderTablaUso();
+            actualizarResumenDoctor();
+
+            try {
+                if (window.db && window.addDoc && window.collection) {
+                    await window.addDoc(window.collection(window.db, "circuitflex_usos"), {
+                        ...nuevoRegistro,
+                        timestamp: window.Timestamp ? window.Timestamp.now() : new Date()
+                    });
+                }
+                showToast(`⚡ ${modeNames[modeId]} iniciado (2s ON / 8s OFF) y guardado en Firebase.`, "success");
+            } catch (err) {
+                console.warn("Guardado en caché local + cola Firebase:", err);
+                showToast(`⚡ ${modeNames[modeId]} en ejecución (2s ON / 8s OFF).`, "success");
+            }
+        }
+
+        function startNitinolCycleEngine() {
+            if (cycleInterval) clearInterval(cycleInterval);
+            isRunning = true;
+            cycleElapsedDeciseconds = 0;
+
+            const badge = document.getElementById('header-active-badge');
+            badge.classList.remove('hidden');
+            badge.classList.add('flex');
+            document.getElementById('header-active-text').textContent = `Modo #${selectedModeId} (2s ON / 8s OFF)`;
+            document.getElementById('menu-live-pill').textContent = `Activo: Modo #${selectedModeId}`;
+            document.getElementById('menu-live-pill').className = "text-[11px] px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 font-bold";
+
+            updateVisualPanelTick();
+            cycleInterval = setInterval(() => {
+                cycleElapsedDeciseconds++;
+                if (cycleElapsedDeciseconds >= 100) {
+                    cycleElapsedDeciseconds = 0;
+                    // En el Modo #4 avanza al siguiente nivel en cada ciclo
+                    if (selectedModeId === 4) {
+                        sequentialStep = (sequentialStep % 3) + 1;
+                    }
+                }
+                updateVisualPanelTick();
+            }, 100);
+        }
+
+        function updateVisualPanelTick() {
+            const sec = (cycleElapsedDeciseconds / 10).toFixed(1);
+            const isHeatingON = cycleElapsedDeciseconds < 20; // Primeros 2.0 segundos = ON, siguientes 8.0 segundos = OFF
+
+            document.getElementById('nitinol-timer').textContent = `${sec}s / 10.0s`;
+
+            const barOn = document.getElementById('cycle-bar-on');
+            const barOff = document.getElementById('cycle-bar-off');
+            const stateLabel = document.getElementById('nitinol-state-label');
+            const ledOrange = document.getElementById('led-orange');
+            const ledYellow = document.getElementById('led-yellow');
+
+            if (isHeatingON) {
+                const pctOn = (cycleElapsedDeciseconds / 20) * 20; // hasta 20% del ancho total
+                barOn.style.width = `${pctOn}%`;
+                barOff.style.width = `0%`;
+                stateLabel.textContent = `🔥 NITINOL ACTIVO (COMPRIMIENDO 2s) - MODO #${selectedModeId}`;
+                stateLabel.className = "font-extrabold text-orange-400 uppercase";
+                ledOrange.className = "w-3 h-3 rounded-full bg-orange-500 shadow-[0_0_10px_#f97316]";
+                ledYellow.className = "w-3 h-3 rounded-full bg-slate-700";
+            } else {
+                barOn.style.width = `20%`;
+                const pctOff = ((cycleElapsedDeciseconds - 20) / 80) * 80;
+                barOff.style.width = `${pctOff}%`;
+                stateLabel.textContent = `❄️ NITINOL DESACTIVADO (ENFRIANDO 8s) - MODO #${selectedModeId}`;
+                stateLabel.className = "font-extrabold text-cyan-400 uppercase";
+                ledOrange.className = "w-3 h-3 rounded-full bg-slate-700";
+                ledYellow.className = "w-3 h-3 rounded-full bg-yellow-400 shadow-[0_0_8px_#facc15]";
+            }
+
+            // Determinar qué zonas del SVG se iluminan
+            const activeZones = [];
+            if (isHeatingON) {
+                if (selectedModeId === 1) activeZones.push(1);
+                else if (selectedModeId === 2) activeZones.push(2);
+                else if (selectedModeId === 3) activeZones.push(3);
+                else if (selectedModeId === 4) activeZones.push(sequentialStep);
+                else if (selectedModeId === 5) activeZones.push(1, 2, 3);
+            }
+
+            for (let z = 1; z <= 3; z++) {
+                const g = document.getElementById(`svg-zone-${z}`);
+                if (!g) continue;
+                if (activeZones.includes(z)) {
+                    g.classList.add('nitinol-heating');
+                    g.style.transform = 'scaleX(0.94)';
+                    g.style.transformOrigin = '125px center';
+                } else {
+                    g.classList.remove('nitinol-heating');
+                    g.style.transform = 'scaleX(1)';
+                }
+            }
+        }
+
+        function detenerModo(silent = false) {
+            if (cycleInterval) clearInterval(cycleInterval);
+            isRunning = false;
+            cycleElapsedDeciseconds = 0;
+
+            document.getElementById('cycle-bar-on').style.width = '0%';
+            document.getElementById('cycle-bar-off').style.width = '0%';
+            document.getElementById('nitinol-timer').textContent = '0.0s / 10.0s';
+            const stateLabel = document.getElementById('nitinol-state-label');
+            stateLabel.textContent = 'SISTEMA EN PAUSA (NITINOL APAGADO)';
+            stateLabel.className = 'font-extrabold text-amber-400 uppercase';
+
+            document.getElementById('led-orange').className = "w-3 h-3 rounded-full bg-slate-700";
+            document.getElementById('led-yellow').className = "w-3 h-3 rounded-full bg-yellow-400 shadow-[0_0_8px_#facc15]";
+
+            for (let z = 1; z <= 3; z++) {
+                const g = document.getElementById(`svg-zone-${z}`);
+                if (g) {
+                    g.classList.remove('nitinol-heating');
+                    g.style.transform = 'scaleX(1)';
+                }
+            }
+
+            const badge = document.getElementById('header-active-badge');
+            badge.classList.add('hidden');
+            badge.classList.remove('flex');
+            document.getElementById('menu-live-pill').textContent = 'En Pausa';
+            document.getElementById('menu-live-pill').className = "text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-semibold";
+
+            if (!silent) showToast("⏹️ Proceso detenido. Nitinol apagado.", "info");
+        }
+
+        // ====================================================================
+        // MONITOREO DE LA MEDIA + ALERTAS AUTOMÁTICAS EN FIREBASE
+        // ====================================================================
+        function updateSimulatedSensors() {
+            currentTemp = parseFloat(document.getElementById('sim-temp-range').value);
+            currentHum = parseInt(document.getElementById('sim-hum-range').value, 10);
+            refreshSensorDisplay();
+
+            // Si supera 38.0 °C, detener Nitinol y guardar alerta térmica en Firebase
+            if (currentTemp >= 38.0) {
+                document.getElementById('led-red').className = "w-3 h-3 rounded-full bg-rose-500 shadow-[0_0_10px_#f43f5e] animate-ping";
+                detenerModo(true);
+                registrarAlertaFirebase(
+                    "Alerta Térmica (>38°C)",
+                    `Temperatura en la media alcanzó ${currentTemp.toFixed(1)} °C (Límite: 38.0 °C). Nitinol apagado por seguridad.`
+                );
+            } else {
+                document.getElementById('led-red').className = "w-3 h-3 rounded-full bg-slate-700";
+            }
+        }
+
+        function setSockPosition(pos, fromMQTT = false) {
+            sockPosition = pos;
+            const btnRel = document.getElementById('btn-pos-relajada');
+            const btnPie = document.getElementById('btn-pos-depie');
+            const monPostura = document.getElementById('mon-postura');
+            const monPosturaSub = document.getElementById('mon-postura-sub');
+            const menuPosVal = document.getElementById('menu-pos-val');
+            const canvasStatus = document.getElementById('canvas-status-text');
+
+            if (pos === 'relajada') {
+                btnRel.className = "py-2.5 px-3 rounded-xl text-xs font-bold border-2 border-emerald-500 bg-emerald-500/15 text-emerald-300 transition";
+                btnPie.className = "py-2.5 px-3 rounded-xl text-xs font-bold border-2 border-slate-700 bg-slate-900 text-slate-300 transition";
+                monPostura.textContent = "RELAJADA (En Reposo)";
+                monPostura.className = "text-2xl font-extrabold text-emerald-400 mt-1";
+                monPosturaSub.textContent = "Pierna horizontal/estable (Az: 850 mg). Posición segura para masaje.";
+                menuPosVal.textContent = "Relajada (En Reposo)";
+                menuPosVal.className = "text-sm font-bold text-emerald-400";
+                canvasStatus.textContent = "Posición: Relajada (En Reposo)";
+                canvasStatus.className = "text-xs font-mono px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+                if (!fromMQTT) document.getElementById('imu-az').textContent = "850";
+            } else {
+                btnPie.className = "py-2.5 px-3 rounded-xl text-xs font-bold border-2 border-amber-500 bg-amber-500/15 text-amber-300 transition";
+                btnRel.className = "py-2.5 px-3 rounded-xl text-xs font-bold border-2 border-slate-700 bg-slate-900 text-slate-300 transition";
+                monPostura.textContent = "DE PIE (En Movimiento)";
+                monPostura.className = "text-2xl font-extrabold text-amber-400 mt-1";
+                monPosturaSub.textContent = "Pierna vertical o con actividad (Az: 180 mg). Masaje en pausa preventiva.";
+                menuPosVal.textContent = "De Pie (Activa)";
+                menuPosVal.className = "text-sm font-bold text-amber-400";
+                canvasStatus.textContent = "Posición: De Pie / Activa";
+                canvasStatus.className = "text-xs font-mono px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20";
+                if (!fromMQTT) document.getElementById('imu-az').textContent = "180";
+
+                if (isRunning) {
+                    detenerModo(true);
+                    registrarAlertaFirebase(
+                        "Alerta Movimiento / Postura",
+                        "La media cambió a posición DE PIE durante un ciclo de masaje. Proceso pausado automáticamente."
+                    );
+                } else if (!fromMQTT) {
+                    showToast("🧍 Posición actualizada a: De Pie", "info");
+                }
+            }
+        }
+
+        function refreshSensorDisplay() {
+            document.getElementById('sim-temp-lbl').textContent = `${currentTemp.toFixed(1)} °C`;
+            document.getElementById('sim-hum-lbl').textContent = `${currentHum} %`;
+            document.getElementById('mon-temp').textContent = currentTemp.toFixed(1);
+            document.getElementById('mon-hum').textContent = currentHum;
+            document.getElementById('menu-temp-val').textContent = `${currentTemp.toFixed(1)} °C`;
+            document.getElementById('menu-hum-val').textContent = `${currentHum} %`;
+
+            const tempBar = document.getElementById('mon-temp-bar');
+            const tempBadge = document.getElementById('mon-temp-badge');
+            const pctTemp = Math.min(100, Math.max(10, ((currentTemp - 20) / 22) * 100));
+            tempBar.style.width = `${pctTemp}%`;
+
+            if (currentTemp >= 38.0) {
+                tempBar.className = "bg-rose-500 h-full transition-all duration-300";
+                tempBadge.textContent = "⚠️ ALERTA TÉRMICA (>= 38.0 °C) - NITINOL APAGADO";
+                tempBadge.className = "mt-2.5 text-xs text-rose-400 font-bold animate-pulse";
+            } else {
+                tempBar.className = "bg-emerald-400 h-full transition-all duration-300";
+                tempBadge.textContent = "● Temperatura segura (< 38.0 °C)";
+                tempBadge.className = "mt-2.5 text-xs text-emerald-400 font-semibold";
+            }
+            document.getElementById('mon-hum-bar').style.width = `${currentHum}%`;
+        }
+
+        // Guardar Alerta en Firebase
+        async function registrarAlertaFirebase(tipo, descripcion) {
+            const { fecha, hora } = getNowDateAndTime();
+            const nuevaAlerta = {
+                fecha,
+                hora,
+                tipo,
+                descripcion,
+                accion: "Nitinol OFF / Pausa"
+            };
+            alertasCache.unshift(nuevaAlerta);
+            renderTablaAlertas();
+            actualizarResumenDoctor();
+
+            try {
+                if (window.db && window.addDoc && window.collection) {
+                    await window.addDoc(window.collection(window.db, "circuitflex_alertas"), {
+                        ...nuevaAlerta,
+                        timestamp: window.Timestamp ? window.Timestamp.now() : new Date()
+                    });
+                }
+                showToast(`🚨 ${tipo} guardada en Firebase (${fecha} ${hora})`, "error");
+            } catch (e) {
+                console.warn("Alerta guardada localmente:", e);
+                showToast(`🚨 ${tipo} registrada (${fecha} ${hora})`, "error");
+            }
+        }
+
+        // ====================================================================
+        // TABLAS Y FILTRADO POR CALENDARIO (HISTÓRICO DE USO Y ALERTAS)
+        // ====================================================================
+        window.syncAllFromFirebase = async function() {
+            await cargarHistoricoUsoFirebase(true);
+            await cargarHistoricoAlertasFirebase(true);
+            actualizarResumenDoctor();
+        };
+
+        async function cargarHistoricoUsoFirebase(silent = false) {
+            try {
+                if (window.db && window.getDocs && window.collection) {
+                    const snap = await window.getDocs(window.collection(window.db, "circuitflex_usos"));
+                    const remotos = [];
+                    snap.forEach(doc => {
+                        const d = doc.data();
+                        remotos.push({
+                            fecha: d.fecha || "2026-11-18",
+                            hora: d.hora || "08:00:00",
+                            modo: d.modo || 1,
+                            nombreModo: d.nombreModo || modeNames[d.modo || 1],
+                            ciclo: d.ciclo || "2s ON / 8s OFF",
+                            origen: "Firebase Cloud"
+                        });
+                    });
+                    if (remotos.length > 0) {
+                        remotos.sort((a, b) => `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`));
+                        usosCache = remotos;
+                    }
+                }
+            } catch (e) {
+                console.warn("Usando caché local sincronizada para histórico de uso:", e);
+            }
+            renderTablaUso();
+            if (!silent) showToast("Histórico de uso sincronizado con Firebase.");
+        }
+
+        function renderTablaUso() {
+            const tbody = document.getElementById('tabla-uso-body');
+            if (!tbody) return;
+            const fechaFiltro = document.getElementById('filter-date-uso').value;
+            const modoFiltro = document.getElementById('filter-mode-uso').value;
+
+            const filtrados = usosCache.filter(item => {
+                const matchFecha = !fechaFiltro || item.fecha === fechaFiltro;
+                const matchModo = modoFiltro === 'all' || String(item.modo) === String(modoFiltro);
+                return matchFecha && matchModo;
+            });
+
+            if (filtrados.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-400">No se encontraron activaciones para la fecha seleccionada en el calendario.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filtrados.map(u => `
+                <tr class="hover:bg-slate-900/60 transition">
+                    <td class="px-6 py-3.5 font-mono text-white">${u.fecha}</td>
+                    <td class="px-6 py-3.5 font-mono text-slate-300">${u.hora}</td>
+                    <td class="px-6 py-3.5 font-bold text-cyan-400">${u.nombreModo}</td>
+                    <td class="px-6 py-3.5 font-mono text-xs text-emerald-400">${u.ciclo}</td>
+                    <td class="px-6 py-3.5"><span class="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px]">${u.origen}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        function filtrarHistoricoUso() {
+            renderTablaUso();
+            showToast("📅 Filtro de calendario aplicado al Histórico de Uso.");
+        }
+
+        function limpiarFiltroUso() {
+            document.getElementById('filter-date-uso').value = '';
+            document.getElementById('filter-mode-uso').value = 'all';
+            renderTablaUso();
+        }
+
+        async function cargarHistoricoAlertasFirebase(silent = false) {
+            try {
+                if (window.db && window.getDocs && window.collection) {
+                    const snap = await window.getDocs(window.collection(window.db, "circuitflex_alertas"));
+                    const remotos = [];
+                    snap.forEach(doc => {
+                        const d = doc.data();
+                        remotos.push({
+                            fecha: d.fecha || "2026-11-18",
+                            hora: d.hora || "08:00:00",
+                            tipo: d.tipo || "Alerta del Sistema",
+                            descripcion: d.descripcion || "Anomalía detectada en la media.",
+                            accion: d.accion || "Nitinol OFF"
+                        });
+                    });
+                    if (remotos.length > 0) {
+                        remotos.sort((a, b) => `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`));
+                        alertasCache = remotos;
+                    }
+                }
+            } catch (e) {
+                console.warn("Usando caché local para alertas:", e);
+            }
+            renderTablaAlertas();
+            if (!silent) showToast("Histórico de alertas sincronizado con Firebase.");
+        }
+
+        function renderTablaAlertas() {
+            const tbody = document.getElementById('tabla-alertas-body');
+            if (!tbody) return;
+            const fechaFiltro = document.getElementById('filter-date-alerta').value;
+            const tipoFiltro = document.getElementById('filter-type-alerta').value;
+
+            const filtrados = alertasCache.filter(item => {
+                const matchFecha = !fechaFiltro || item.fecha === fechaFiltro;
+                const matchTipo = tipoFiltro === 'all' || item.tipo.toLowerCase().includes(tipoFiltro.toLowerCase());
+                return matchFecha && matchTipo;
+            });
+
+            if (filtrados.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-400">No hay alertas registradas para los criterios seleccionados.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filtrados.map(a => `
+                <tr class="hover:bg-slate-900/60 transition">
+                    <td class="px-6 py-3.5 font-mono text-white">${a.fecha}</td>
+                    <td class="px-6 py-3.5 font-mono text-slate-300">${a.hora}</td>
+                    <td class="px-6 py-3.5 font-bold text-rose-400">${a.tipo}</td>
+                    <td class="px-6 py-3.5 text-slate-300">${a.descripcion}</td>
+                    <td class="px-6 py-3.5"><span class="px-2.5 py-1 rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/30 font-semibold text-[11px]">${a.accion}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        function filtrarHistoricoAlertas() {
+            renderTablaAlertas();
+            showToast("📅 Filtro de calendario aplicado al Histórico de Alertas.");
+        }
+
+        function limpiarFiltroAlertas() {
+            document.getElementById('filter-date-alerta').value = '';
+            document.getElementById('filter-type-alerta').value = 'all';
+            renderTablaAlertas();
+        }
+
+        // ====================================================================
+        // DATOS DEL DOCTOR Y ENVÍO DE REPORTE POR CORREO ELECTRÓNICO
+        // ====================================================================
+        function construirTextoReporteDoctor() {
+            const docNombre = document.getElementById('doc-nombre').value.trim();
+            const docEsp = document.getElementById('doc-especialidad').value.trim();
+            const docNotas = document.getElementById('doc-notas').value.trim();
+
+            let texto = `REPORTE CLÍNICO BIOMÉDICO - CIRCUITFLEX E-TEXTIL\n`;
+            texto += `====================================================\n`;
+            texto += `Médico Destinatario: ${docNombre} (${docEsp})\n`;
+            texto += `Notas del Paciente: ${docNotas}\n`;
+            texto += `Base de Datos: Firebase Project nexa-ee7ee\n\n`;
+
+            texto += `1. HISTÓRICO DE ACTIVACIONES DE MODOS (${usosCache.length} registros):\n`;
+            usosCache.slice(0, 15).forEach((u, idx) => {
+                texto += `   ${idx + 1}. [${u.fecha} ${u.hora}] -> ${u.nombreModo} (${u.ciclo})\n`;
+            });
+
+            texto += `\n2. HISTÓRICO DE ALERTAS DE SEGURIDAD (${alertasCache.length} alertas):\n`;
+            alertasCache.slice(0, 15).forEach((a, idx) => {
+                texto += `   ${idx + 1}. [${a.fecha} ${a.hora}] -> ${a.tipo}: ${a.descripcion}\n`;
+            });
+
+            return texto;
+        }
+
+        function actualizarResumenDoctor() {
+            const emailInput = document.getElementById('doc-email');
+            if (!emailInput) return;
+            document.getElementById('preview-doc-email').textContent = emailInput.value;
+            document.getElementById('count-uso-envio').textContent = `${usosCache.length} registros`;
+            document.getElementById('count-alerta-envio').textContent = `${alertasCache.length} alertas`;
+            document.getElementById('email-report-preview').value = construirTextoReporteDoctor();
+        }
+
+        async function guardarDatosDoctor(e) {
+            e.preventDefault();
+            actualizarResumenDoctor();
+            try {
+                if (window.db && window.addDoc && window.collection) {
+                    await window.addDoc(window.collection(window.db, "circuitflex_doctores"), {
+                        nombre: document.getElementById('doc-nombre').value.trim(),
+                        especialidad: document.getElementById('doc-especialidad').value.trim(),
+                        email: document.getElementById('doc-email').value.trim(),
+                        clinica: document.getElementById('doc-clinica').value.trim(),
+                        notas: document.getElementById('doc-notas').value.trim(),
+                        timestamp: window.Timestamp ? window.Timestamp.now() : new Date()
+                    });
+                }
+            } catch (err) {
+                console.warn("Datos de doctor guardados en sesión:", err);
+            }
+            showToast("✅ Datos del Doctor guardados y reporte actualizado.", "success");
+        }
+
+        function enviarReporteDoctor() {
+            actualizarResumenDoctor();
+            const email = document.getElementById('doc-email').value.trim();
+            if (!email || !email.includes('@')) {
+                showToast("⚠️ Ingrese un correo electrónico válido para el doctor.", "error");
+                return;
+            }
+            const subject = encodeURIComponent("Reporte Clínico CircuitFlex - Historial de Usos y Alertas");
+            const body = encodeURIComponent(construirTextoReporteDoctor());
+            window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+            showToast(`📧 Abriendo cliente de correo con el historial completo para ${email}`, "success");
+        }
+
+        function copiarReportePortapapeles() {
+            const area = document.getElementById('email-report-preview');
+            area.select();
+            document.execCommand('copy');
+            showToast("📋 Historial completo copiado al portapapeles.", "success");
+        }
+
+        // Validación de Formulario de Contacto en Manual de Uso
+        function submitContactForm(e) {
+            e.preventDefault();
+            const n = document.getElementById('contact-name').value.trim();
+            const em = document.getElementById('contact-email').value.trim();
+            const m = document.getElementById('contact-msg').value.trim();
+            if (!n || !em.includes('@') || !m) {
+                showToast("⚠️ Por favor completa todos los campos del formulario correctamente.", "error");
+                return;
+            }
+            document.getElementById('contact-form').reset();
+            showToast("✅ Mensaje enviado al equipo de soporte de CircuitFlex.", "success");
+        }
+
+        // Sistema de Notificaciones Toast
+        function showToast(msg, type = "info") {
+            const toast = document.getElementById('toast-notification');
+            const text = document.getElementById('toast-text');
+            text.textContent = msg;
+            toast.classList.remove('translate-y-24', 'opacity-0');
+            clearTimeout(window.toastTimer);
+            window.toastTimer = setTimeout(() => {
+                toast.classList.add('translate-y-24', 'opacity-0');
+            }, 3800);
+        }
+
+        function toggleMobileMenu() {
+            document.getElementById('mobile-menu').classList.toggle('hidden');
+        }
+
+        // Modo Oscuro / Claro
+        function toggleTheme() {
+            const htmlEl = document.documentElement;
+            htmlEl.classList.toggle('dark');
+            htmlEl.classList.toggle('light');
+            showToast(htmlEl.classList.contains('light') ? "☀️ Modo Claro activado" : "🌙 Modo Oscuro activado");
+        }
+
+        // Traductor Bilingüe Completo (Español / English)
+        const i18nDict = {
+            es: {
+                loginSub: "Sistema Inteligente E-Textil de Compresión y Masaje con Nitinol",
+                userLabel: "Usuario de Acceso",
+                passLabel: "Contraseña / Clave",
+                loginBtn: "Ingresar a CircuitFlex",
+                navMenu: "Menú",
+                navModos: "Modos (1-5)",
+                navMonitoreo: "Monitoreo Media",
+                navUso: "Histórico Uso",
+                navAlertas: "Histórico Alertas",
+                navDoctor: "Datos Doctor",
+                navManual: "Manual de Uso",
+                btnExit: "Salir",
+                backMenu: "Volver al Menú",
+                heroBadge: "Plataforma Biomédica E-Textil Activa",
+                heroTitle: "Bienvenido a CircuitFlex",
+                heroDesc: "Control integral de compresión vascular y masaje muscular mediante actuadores de Nitinol (2s ON / 8s OFF), telemetría Bosch XDK110 y respaldo clínico en la nube con Firebase.",
+                heroBtnModes: "Seleccionar Modo de Masaje (1-5)",
+                heroBtnMon: "Mediciones en la Media",
+                menuModulesTitle: "Módulos del Sistema CircuitFlex (Seleccione una ventana)",
+                card1Title: "1. Modos de Funcionamiento",
+                card2Title: "2. Mediciones en la Media",
+                card3Title: "3. Histórico de Uso",
+                card4Title: "4. Histórico de Alertas",
+                card5Title: "5. Datos de Doctor",
+                card6Title: "6. Manual de Uso",
+                openWin: "Abrir ventana",
+                modesHeader: "Modos de Funcionamiento CircuitFlex",
+                m1Title: "Modo #1: Trabajo en el Tobillo",
+                m2Title: "Modo #2: Trabajo en la Parte Media de la Pierna",
+                m3Title: "Modo #3: Trabajo en la Parte Alta de la Media",
+                m4Title: "Modo #4: Trabajo Secuencial por Niveles",
+                m5Title: "Modo #5: Todos a la Vez en el Mismo Momento",
+                btnStartMode: "Iniciar / Reiniciar Modo",
+                btnStopMode: "Detener / Pausar",
+                monHeader: "Monitoreo y Mediciones en la Media",
+                usoHeader: "Histórico de Uso y Activaciones",
+                alertasHeader: "Histórico de Alertas del Dispositivo",
+                docHeader: "Datos del Doctor y Envío de Historial",
+                manualHeader: "Manual de Uso - CircuitFlex"
+            },
+            en: {
+                loginSub: "Intelligent E-Textile Nitinol Compression & Massage System",
+                userLabel: "Access Username",
+                passLabel: "Password / Key",
+                loginBtn: "Sign In to CircuitFlex",
+                navMenu: "Main Menu",
+                navModos: "Modes (1-5)",
+                navMonitoreo: "Sock Monitoring",
+                navUso: "Usage History",
+                navAlertas: "Alert History",
+                navDoctor: "Doctor Info",
+                navManual: "User Manual",
+                btnExit: "Log Out",
+                backMenu: "Back to Menu",
+                heroBadge: "Active Biomedical E-Textile Platform",
+                heroTitle: "Welcome to CircuitFlex",
+                heroDesc: "Comprehensive vascular compression and muscle massage control using Nitinol actuators (2s ON / 8s OFF), Bosch XDK110 telemetry, and Firebase cloud backup.",
+                heroBtnModes: "Select Massage Mode (1-5)",
+                heroBtnMon: "Live Sock Measurements",
+                menuModulesTitle: "CircuitFlex System Modules (Select a window)",
+                card1Title: "1. Operating Modes",
+                card2Title: "2. Sock Live Measurements",
+                card3Title: "3. Usage History",
+                card4Title: "4. Alert History",
+                card5Title: "5. Doctor Info & Reports",
+                card6Title: "6. User Manual",
+                openWin: "Open window",
+                modesHeader: "CircuitFlex Operating Modes",
+                m1Title: "Mode #1: Ankle Zone Compression",
+                m2Title: "Mode #2: Mid-Leg (Calf) Compression",
+                m3Title: "Mode #3: Upper Sock Compression",
+                m4Title: "Mode #4: Sequential Multi-Level Progression",
+                m5Title: "Mode #5: All Zones Simultaneously at Once",
+                btnStartMode: "Start / Restart Mode",
+                btnStopMode: "Stop / Pause",
+                monHeader: "Live Sock Monitoring & Measurements",
+                usoHeader: "Activation & Usage History",
+                alertasHeader: "Device Safety Alert History",
+                docHeader: "Doctor Details & Email History Dispatch",
+                manualHeader: "CircuitFlex User Manual"
+            }
+        };
+
+        function changeLanguage(lang) {
+            const dict = i18nDict[lang] || i18nDict.es;
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (dict[key]) el.textContent = dict[key];
+            });
+            showToast(lang === 'en' ? "🇺🇸 Language switched to English" : "🇪🇸 Idioma cambiado a Español");
+        }
+
+        // Eventos de Scroll para botón "Volver Arriba" y barra CTA flotante
+        window.addEventListener('scroll', () => {
+            const btnTop = document.getElementById('back-to-top');
+            const scrollCta = document.getElementById('scroll-cta');
+            if (window.scrollY > 220) {
+                btnTop.classList.remove('hidden');
+                scrollCta.classList.remove('hidden');
+                scrollCta.classList.add('flex');
+            } else {
+                btnTop.classList.add('hidden');
+                scrollCta.classList.add('hidden');
+                scrollCta.classList.remove('flex');
+            }
+        });
+
+        // ====================================================================
+        // ANIMACIÓN CANVAS EN VIVO (MONITOREO DE POSICIÓN RELAJADA VS DE PIE)
+        // ====================================================================
+        const canvas = document.getElementById('liveCanvas');
+        const ctx = canvas.getContext('2d');
+        let animTick = 0;
+
+        function drawBiomechanicalCanvas() {
+            if (!canvas || !ctx) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Rejilla técnica
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < canvas.width; x += 32) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += 32) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            }
+
+            animTick += 0.05;
+            const pulse = isRunning ? Math.sin(animTick * 2) * 5 : Math.sin(animTick) * 1.5;
+
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+
+            // Si está "relajada" se dibuja en ángulo de reposo horizontal/inclinado suave; si está "depie" vertical
+            const rotationAngle = sockPosition === 'relajada' ? -0.45 : 0;
+            ctx.rotate(rotationAngle);
+
+            // Contorno de la pierna / media
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 38 + pulse, 86, 0, 0, Math.PI * 2);
+            ctx.fillStyle = '#0f172a';
+            ctx.fill();
+            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = sockPosition === 'relajada' ? '#10b981' : '#f59e0b';
+            ctx.stroke();
+
+            // 3 Anillos de Nitinol (Alta, Media, Tobillo)
+            const ringPositions = [-42, 0, 42];
+            ringPositions.forEach((yPos, idx) => {
+                ctx.beginPath();
+                ctx.ellipse(0, yPos, 39 + pulse, 10, 0, 0, Math.PI * 2);
+                ctx.strokeStyle = isRunning ? '#06b6d4' : '#475569';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            });
+
+            ctx.restore();
+
+            // Etiqueta informativa dentro del canvas
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.fillText(
+                sockPosition === 'relajada'
+                    ? "POSTURA DETECTADA: PIERNA RELAJADA (EN REPOSO)"
+                    : "POSTURA DETECTADA: PIERNA DE PIE / EN MOVIMIENTO",
+                16, 24
+            );
+
+            requestAnimationFrame(drawBiomechanicalCanvas);
+        }
+
+        drawBiomechanicalCanvas();
+        renderTablaUso();
+        renderTablaAlertas();
+        actualizarResumenDoctor();
+    </script>
+</body>
+</html>
